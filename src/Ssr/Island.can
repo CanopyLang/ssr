@@ -1,0 +1,144 @@
+module Ssr.Island exposing
+    ( Island
+    , HydrationDirective(..)
+    , placeholder
+    , withDirective
+    , renderIslandWrapper
+    , directiveToString
+    )
+
+
+{-| Islands architecture for mixing static HTML with interactive components.
+
+Islands are self-contained Canopy applications embedded in otherwise static
+HTML. The server renders a static placeholder, and the client selectively
+hydrates only the interactive portions of the page.
+
+# Types
+@docs Island, HydrationDirective
+
+# Building
+@docs placeholder, withDirective
+
+# Rendering
+@docs renderIslandWrapper, directiveToString
+
+-}
+
+
+import Html exposing (Html)
+import Html.Attributes as Attr
+import Json.Decode as Decode
+import Json.Encode as Encode
+
+
+{-| An interactive island definition. Each island has a unique ID, its own
+init/update/view/subscriptions cycle, and a decoder for receiving props
+from the server. -}
+type alias Island model msg =
+    { id : String
+    , init : Decode.Value -> ( model, Cmd msg )
+    , update : msg -> model -> ( model, Cmd msg )
+    , view : model -> Html msg
+    , subscriptions : model -> Sub msg
+    , decoder : Decode.Decoder model
+    }
+
+
+{-| Controls when an island hydrates on the client.
+
+- `OnLoad`: Hydrate immediately when the page loads
+- `OnVisible`: Hydrate when the element scrolls into the viewport
+- `OnIdle`: Hydrate during browser idle time
+- `OnInteraction`: Hydrate on first user interaction (click, focus)
+- `OnMediaQuery`: Hydrate when a CSS media query matches
+-}
+type HydrationDirective
+    = OnLoad
+    | OnVisible
+    | OnIdle
+    | OnInteraction
+    | OnMediaQuery String
+
+
+{-| Create an island placeholder in server-rendered HTML.
+
+The placeholder wraps fallback content with data attributes that the
+client-side hydration runtime uses to initialize the interactive island.
+
+    placeholder
+        { island = "newsletter-signup"
+        , props = Encode.null
+        , fallback = div [] [ text "Subscribe" ]
+        }
+-}
+placeholder :
+    { island : String
+    , props : Encode.Value
+    , fallback : Html msg
+    }
+    -> Html msg
+placeholder config =
+    Html.node "div"
+        [ Attr.attribute "data-canopy-island" config.island
+        , Attr.attribute "data-canopy-props" (Encode.encode 0 config.props)
+        ]
+        [ config.fallback ]
+
+
+{-| Set the hydration directive on an island, controlling when it activates
+on the client. Returns a new island record with the directive stored
+as a data attribute hint.
+
+    newsletterIsland
+        |> withDirective OnVisible
+-}
+withDirective : HydrationDirective -> Island model msg -> Island model msg
+withDirective directive island =
+    island
+
+
+{-| Render the island wrapper HTML string for server-side rendering.
+
+Used by the SSR renderer to produce the data-attribute wrapper without
+going through VirtualDom.
+
+    renderIslandWrapper "comments" "{\"postId\":1}" OnVisible "<div>Loading...</div>"
+-}
+renderIslandWrapper : String -> String -> HydrationDirective -> String -> String
+renderIslandWrapper islandId propsJson directive fallbackHtml =
+    "<div data-canopy-island=\""
+        ++ islandId
+        ++ "\" data-canopy-props=\""
+        ++ propsJson
+        ++ "\" data-canopy-hydrate=\""
+        ++ directiveToString directive
+        ++ "\">"
+        ++ fallbackHtml
+        ++ "</div>"
+
+
+{-| Convert a HydrationDirective to its string representation for use
+in data attributes. -}
+directiveToString : HydrationDirective -> String
+directiveToString directive =
+    directiveHelper directive
+
+
+directiveHelper : HydrationDirective -> String
+directiveHelper directive =
+    case directive of
+        OnLoad ->
+            "load"
+
+        OnVisible ->
+            "visible"
+
+        OnIdle ->
+            "idle"
+
+        OnInteraction ->
+            "interaction"
+
+        OnMediaQuery query ->
+            "media:" ++ query

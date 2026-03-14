@@ -1,0 +1,226 @@
+module Ssr exposing
+    ( SsrError(..)
+    , RenderResult
+    , renderPage
+    , renderPageWithHead
+    , errorToString
+    , buildHead
+    )
+
+
+{-| Server-side rendering entry points and configuration.
+
+This module provides the top-level API for rendering Canopy applications
+on the server. It coordinates VirtualDom-to-HTML conversion, head management,
+state serialization, and error handling.
+
+# Types
+@docs SsrError, RenderResult
+
+# Rendering
+@docs renderPage, renderPageWithHead
+
+# Errors
+@docs errorToString
+
+# Head Helpers
+@docs buildHead
+
+-}
+
+
+import Json.Encode as Encode
+import VirtualDom
+import Ssr.Head as Head exposing (Head, HeadContext)
+import Ssr.Meta as Meta exposing (MetaTag)
+import Ssr.Render as Render
+
+
+{-| Errors that can occur during server-side rendering. -}
+type SsrError
+    = RouteNotFound String
+    | RenderError String
+    | SerializationError String
+
+
+{-| The result of server-side rendering a page, containing the rendered
+HTML body, head content, serialized state, HTTP status code, and headers. -}
+type alias RenderResult =
+    { html : String
+    , head : String
+    , state : Encode.Value
+    , statusCode : Int
+    , headers : List ( String, String )
+    }
+
+
+{-| Render a VirtualDom view to a complete RenderResult with the given state
+and head context.
+
+    renderPage
+        { view = myView model
+        , state = encodeModel model
+        , headContext = myHeadContext
+        , statusCode = 200
+        }
+-}
+renderPage :
+    { view : VirtualDom.Node msg
+    , state : Encode.Value
+    , headContext : HeadContext
+    , statusCode : Int
+    }
+    -> RenderResult
+renderPage config =
+    { html = Render.toHydratableString config.view
+    , head = Head.render config.headContext
+    , state = config.state
+    , statusCode = config.statusCode
+    , headers =
+        [ ( "Content-Type", "text/html; charset=utf-8" )
+        ]
+    }
+
+
+{-| Render a VirtualDom view with a Head record rather than a HeadContext.
+
+A convenience function for cases where you have a Head record directly.
+-}
+renderPageWithHead :
+    { view : VirtualDom.Node msg
+    , state : Encode.Value
+    , head : Head
+    , statusCode : Int
+    }
+    -> RenderResult
+renderPageWithHead config =
+    let
+        ctx =
+            headToContext config.head
+    in
+    { html = Render.toHydratableString config.view
+    , head = Head.render ctx
+    , state = config.state
+    , statusCode = config.statusCode
+    , headers =
+        [ ( "Content-Type", "text/html; charset=utf-8" )
+        ]
+    }
+
+
+headToContext : Head -> HeadContext
+headToContext head =
+    let
+        withTitle =
+            Head.title head.title Head.init
+
+        withMeta =
+            List.foldl Head.addMeta withTitle head.meta
+
+        withLinks =
+            List.foldl Head.addLink withMeta head.links
+
+        withScripts =
+            List.foldl Head.addScript withLinks head.scripts
+    in
+    addOptionalStructuredData head.structuredData withScripts
+
+
+addOptionalStructuredData : Maybe Encode.Value -> HeadContext -> HeadContext
+addOptionalStructuredData maybeValue ctx =
+    case maybeValue of
+        Nothing ->
+            ctx
+
+        Just value ->
+            Head.setStructuredData value ctx
+
+
+{-| Convert an SsrError to a human-readable string for logging. -}
+errorToString : SsrError -> String
+errorToString err =
+    errorHelper err
+
+
+errorHelper : SsrError -> String
+errorHelper err =
+    case err of
+        RouteNotFound path ->
+            "Route not found: " ++ path
+
+        RenderError msg ->
+            "Render error: " ++ msg
+
+        SerializationError msg ->
+            "Serialization error: " ++ msg
+
+
+{-| Build a Head record from common fields, automatically generating
+Open Graph and Twitter Card meta tags.
+
+    buildHead
+        { title = "My Page"
+        , description = "Page description"
+        , url = "https://example.com/page"
+        , image = Just "https://example.com/image.jpg"
+        , siteName = "My Site"
+        , twitterHandle = Just "@mysite"
+        }
+-}
+buildHead :
+    { title : String
+    , description : String
+    , url : String
+    , image : Maybe String
+    , siteName : String
+    , twitterHandle : Maybe String
+    }
+    -> Head
+buildHead config =
+    let
+        baseMeta =
+            [ Meta.description config.description
+            , Meta.ogTitle config.title
+            , Meta.ogDescription config.description
+            , Meta.ogUrl config.url
+            , Meta.ogType "website"
+            , Meta.ogSiteName config.siteName
+            , Meta.twitterCard "summary_large_image"
+            , Meta.twitterTitle config.title
+            , Meta.twitterDescription config.description
+            ]
+
+        imageMeta =
+            buildImageMeta config.image
+
+        twitterMeta =
+            buildTwitterHandleMeta config.twitterHandle
+    in
+    { title = config.title
+    , meta = baseMeta ++ imageMeta ++ twitterMeta
+    , links = []
+    , scripts = []
+    , structuredData = Nothing
+    }
+
+
+buildImageMeta : Maybe String -> List MetaTag
+buildImageMeta maybeImage =
+    case maybeImage of
+        Nothing ->
+            []
+
+        Just url ->
+            [ Meta.ogImage url
+            , Meta.twitterImage url
+            ]
+
+
+buildTwitterHandleMeta : Maybe String -> List MetaTag
+buildTwitterHandleMeta maybeHandle =
+    case maybeHandle of
+        Nothing ->
+            []
+
+        Just handle ->
+            [ Meta.twitterSite handle ]

@@ -1,0 +1,360 @@
+module Test.Render exposing (main, tests)
+
+import Basics exposing (..)
+import Html exposing (Html, div, text, p, span, h1, a, br, img, input, hr)
+import Html.Attributes exposing (class, id, style, href, src, alt, disabled, checked, attribute)
+import Html.Keyed as Keyed
+import Ssr.Render as Render
+import Test exposing (..)
+import Expect
+
+
+main : Test
+main =
+    tests
+
+
+tests : Test
+tests =
+    describe "Ssr.Render"
+        [ toStringTests
+        , escapeHtmlTests
+        , styleToStringTests
+        , toHydratableStringTests
+        , toDocumentTests
+        , toPrettyStringTests
+        ]
+
+
+
+-- toString
+
+
+toStringTests : Test
+toStringTests =
+    describe "toString"
+        [ test "renders text node" <|
+            \() ->
+                Render.toString (text "Hello")
+                    |> Expect.equal "Hello"
+        , test "renders empty div" <|
+            \() ->
+                Render.toString (div [] [])
+                    |> Expect.equal "<div></div>"
+        , test "renders div with text child" <|
+            \() ->
+                Render.toString (div [] [ text "Hello" ])
+                    |> Expect.equal "<div>Hello</div>"
+        , test "renders nested elements" <|
+            \() ->
+                Render.toString (div [] [ p [] [ text "Para" ] ])
+                    |> Expect.equal "<div><p>Para</p></div>"
+        , test "renders div with class attribute" <|
+            \() ->
+                Render.toString (div [ class "container" ] [])
+                    |> Expect.equal "<div class=\"container\"></div>"
+        , test "renders div with id" <|
+            \() ->
+                Render.toString (div [ id "main" ] [])
+                    |> Expect.equal "<div id=\"main\"></div>"
+        , test "renders div with style" <|
+            \() ->
+                Render.toString (div [ style "color" "red" ] [])
+                    |> Expect.equal "<div style=\"color: red\"></div>"
+        , test "renders div with multiple styles" <|
+            \() ->
+                Render.toString (div [ style "color" "red", style "font-size" "16px" ] [])
+                    |> Expect.equal "<div style=\"color: red; font-size: 16px\"></div>"
+        , test "renders void element br" <|
+            \() ->
+                Render.toString (br [] [])
+                    |> Expect.equal "<br />"
+        , test "renders void element img" <|
+            \() ->
+                Render.toString (img [ src "test.png" ] [])
+                    |> Expect.equal "<img src=\"test.png\" />"
+        , test "renders void element input" <|
+            \() ->
+                Render.toString (input [ attribute "type" "text" ] [])
+                    |> Expect.equal "<input type=\"text\" />"
+        , test "renders void element hr" <|
+            \() ->
+                Render.toString (hr [] [])
+                    |> Expect.equal "<hr />"
+        , test "renders multiple children" <|
+            \() ->
+                Render.toString (div [] [ text "A", text "B", text "C" ])
+                    |> Expect.equal "<div>ABC</div>"
+        , test "renders anchor with href" <|
+            \() ->
+                Render.toString (a [ href "/about" ] [ text "About" ])
+                    |> Expect.equal "<a href=\"/about\">About</a>"
+        , test "renders boolean attribute disabled" <|
+            \() ->
+                Render.toString (input [ disabled True ] [])
+                    |> Expect.equal "<input disabled />"
+        , test "renders deeply nested structure" <|
+            \() ->
+                Render.toString
+                    (div [ class "outer" ]
+                        [ div [ class "inner" ]
+                            [ p [] [ span [] [ text "Deep" ] ]
+                            ]
+                        ]
+                    )
+                    |> Expect.equal "<div class=\"outer\"><div class=\"inner\"><p><span>Deep</span></p></div></div>"
+        , test "renders h1 with text" <|
+            \() ->
+                Render.toString (h1 [] [ text "Title" ])
+                    |> Expect.equal "<h1>Title</h1>"
+        , test "escapes text content" <|
+            \() ->
+                Render.toString (text "<script>alert('xss')</script>")
+                    |> Expect.equal "&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;"
+        , test "escapes attribute values" <|
+            \() ->
+                Render.toString (div [ class "a\"b" ] [])
+                    |> Expect.equal "<div class=\"a&quot;b\"></div>"
+        , test "renders custom attribute" <|
+            \() ->
+                Render.toString (div [ attribute "data-value" "42" ] [])
+                    |> Expect.equal "<div data-value=\"42\"></div>"
+        , test "renders keyed node" <|
+            \() ->
+                Render.toString (Keyed.node "ul" [] [ ( "1", Html.li [] [ text "One" ] ) ])
+                    |> Expect.equal "<ul><li>One</li></ul>"
+        , test "renders multiple keyed children" <|
+            \() ->
+                Render.toString
+                    (Keyed.node "ul" []
+                        [ ( "a", Html.li [] [ text "A" ] )
+                        , ( "b", Html.li [] [ text "B" ] )
+                        ]
+                    )
+                    |> Expect.equal "<ul><li>A</li><li>B</li></ul>"
+        ]
+
+
+
+-- escapeHtml
+
+
+escapeHtmlTests : Test
+escapeHtmlTests =
+    describe "escapeHtml"
+        [ test "no-ops on safe string" <|
+            \() ->
+                Render.escapeHtml "hello world"
+                    |> Expect.equal "hello world"
+        , test "escapes ampersand" <|
+            \() ->
+                Render.escapeHtml "a&b"
+                    |> Expect.equal "a&amp;b"
+        , test "escapes less than" <|
+            \() ->
+                Render.escapeHtml "a<b"
+                    |> Expect.equal "a&lt;b"
+        , test "escapes greater than" <|
+            \() ->
+                Render.escapeHtml "a>b"
+                    |> Expect.equal "a&gt;b"
+        , test "escapes double quote" <|
+            \() ->
+                Render.escapeHtml "a\"b"
+                    |> Expect.equal "a&quot;b"
+        , test "escapes single quote" <|
+            \() ->
+                Render.escapeHtml "a'b"
+                    |> Expect.equal "a&#x27;b"
+        , test "escapes multiple characters" <|
+            \() ->
+                Render.escapeHtml "<div class=\"x\">&</div>"
+                    |> Expect.equal "&lt;div class=&quot;x&quot;&gt;&amp;&lt;/div&gt;"
+        , test "handles empty string" <|
+            \() ->
+                Render.escapeHtml ""
+                    |> Expect.equal ""
+        ]
+
+
+
+-- styleToString
+
+
+styleToStringTests : Test
+styleToStringTests =
+    describe "styleToString"
+        [ test "renders single style pair" <|
+            \() ->
+                Render.styleToString [ ( "color", "red" ) ]
+                    |> Expect.equal "color: red"
+        , test "renders multiple style pairs" <|
+            \() ->
+                Render.styleToString [ ( "color", "red" ), ( "font-size", "16px" ) ]
+                    |> Expect.equal "color: red; font-size: 16px"
+        , test "renders empty list" <|
+            \() ->
+                Render.styleToString []
+                    |> Expect.equal ""
+        , test "renders three style pairs" <|
+            \() ->
+                Render.styleToString [ ( "margin", "0" ), ( "padding", "10px" ), ( "border", "none" ) ]
+                    |> Expect.equal "margin: 0; padding: 10px; border: none"
+        ]
+
+
+
+-- toHydratableString
+
+
+toHydratableStringTests : Test
+toHydratableStringTests =
+    describe "toHydratableString"
+        [ test "adds data-canopy-id to elements" <|
+            \() ->
+                let
+                    _ = Render.resetIdCounter ()
+                    result = Render.toHydratableString (div [] [ text "Hello" ])
+                in
+                String.contains "data-canopy-id" result
+                    |> Expect.equal True
+        , test "text nodes have no data-canopy-id" <|
+            \() ->
+                let
+                    _ = Render.resetIdCounter ()
+                    result = Render.toHydratableString (text "Hello")
+                in
+                String.contains "data-canopy-id" result
+                    |> Expect.equal False
+        , test "renders content alongside hydration markers" <|
+            \() ->
+                let
+                    _ = Render.resetIdCounter ()
+                    result = Render.toHydratableString (div [] [ text "Content" ])
+                in
+                String.contains "Content" result
+                    |> Expect.equal True
+        , test "preserves element structure" <|
+            \() ->
+                let
+                    _ = Render.resetIdCounter ()
+                    result = Render.toHydratableString (div [ class "test" ] [ p [] [ text "Hi" ] ])
+                in
+                (String.contains "class=\"test\"" result
+                    && String.contains "<p" result
+                    && String.contains "Hi" result)
+                    |> Expect.equal True
+        ]
+
+
+
+-- toDocument
+
+
+toDocumentTests : Test
+toDocumentTests =
+    describe "toDocument"
+        [ test "includes DOCTYPE" <|
+            \() ->
+                let
+                    doc = Render.toDocument
+                        { title = "Test"
+                        , headContent = ""
+                        , body = div [] [ text "Body" ]
+                        , stateJson = "{}"
+                        , clientScript = "/app.js"
+                        }
+                in
+                String.contains "<!DOCTYPE html>" doc
+                    |> Expect.equal True
+        , test "includes title" <|
+            \() ->
+                let
+                    doc = Render.toDocument
+                        { title = "My Page"
+                        , headContent = ""
+                        , body = div [] []
+                        , stateJson = "{}"
+                        , clientScript = "/app.js"
+                        }
+                in
+                String.contains "<title>My Page</title>" doc
+                    |> Expect.equal True
+        , test "includes body content" <|
+            \() ->
+                let
+                    _ = Render.resetIdCounter ()
+                    doc = Render.toDocument
+                        { title = "Test"
+                        , headContent = ""
+                        , body = div [] [ text "Hello World" ]
+                        , stateJson = "{}"
+                        , clientScript = "/app.js"
+                        }
+                in
+                String.contains "Hello World" doc
+                    |> Expect.equal True
+        , test "includes state script" <|
+            \() ->
+                let
+                    doc = Render.toDocument
+                        { title = "Test"
+                        , headContent = ""
+                        , body = div [] []
+                        , stateJson = "{\"page\":\"home\"}"
+                        , clientScript = "/app.js"
+                        }
+                in
+                String.contains "__CANOPY_STATE__" doc
+                    |> Expect.equal True
+        , test "includes client script" <|
+            \() ->
+                let
+                    doc = Render.toDocument
+                        { title = "Test"
+                        , headContent = ""
+                        , body = div [] []
+                        , stateJson = "{}"
+                        , clientScript = "/bundle.js"
+                        }
+                in
+                String.contains "/bundle.js" doc
+                    |> Expect.equal True
+        , test "includes head content" <|
+            \() ->
+                let
+                    doc = Render.toDocument
+                        { title = "Test"
+                        , headContent = "<meta name=\"description\" content=\"hello\" />"
+                        , body = div [] []
+                        , stateJson = "{}"
+                        , clientScript = "/app.js"
+                        }
+                in
+                String.contains "<meta name=\"description\" content=\"hello\" />" doc
+                    |> Expect.equal True
+        ]
+
+
+
+-- toPrettyString
+
+
+toPrettyStringTests : Test
+toPrettyStringTests =
+    describe "toPrettyString"
+        [ test "indents nested elements" <|
+            \() ->
+                let
+                    result = Render.toPrettyString 2 (div [] [ p [] [ text "Hi" ] ])
+                in
+                String.contains "\n" result
+                    |> Expect.equal True
+        , test "renders text without extra indentation" <|
+            \() ->
+                let
+                    result = Render.toPrettyString 2 (text "Simple")
+                in
+                result
+                    |> Expect.equal "Simple"
+        ]

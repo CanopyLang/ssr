@@ -1,0 +1,734 @@
+module Test.Ssr exposing (main, tests)
+
+import Basics exposing (..)
+import Json.Encode as Encode
+import VirtualDom
+import Html exposing (div, text, p)
+import Html.Attributes exposing (class)
+import Ssr exposing (SsrError(..), RenderResult)
+import Ssr.Head as Head
+import Ssr.Meta as Meta exposing (MetaTag(..), LinkTag(..), ScriptTag(..))
+import Test exposing (..)
+import Expect
+
+
+main : Test
+main =
+    tests
+
+
+tests : Test
+tests =
+    describe "Ssr"
+        [ renderPageTests
+        , renderPageWithHeadTests
+        , renderPageWithHeadLinksAndScriptsTests
+        , errorToStringTests
+        , buildHeadTests
+        , renderResultConstructorTests
+        ]
+
+
+
+-- RENDER PAGE
+
+
+renderPageTests : Test
+renderPageTests =
+    describe "renderPage"
+        [ test "renders HTML body from VirtualDom node" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPage
+                            { view = div [] [ text "Hello" ]
+                            , state = Encode.null
+                            , headContext = Head.init
+                            , statusCode = 200
+                            }
+                in
+                String.contains "Hello" result.html
+                    |> Expect.equal True
+        , test "includes hydration markers in html output" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPage
+                            { view = div [] [ text "Content" ]
+                            , state = Encode.null
+                            , headContext = Head.init
+                            , statusCode = 200
+                            }
+                in
+                String.contains "data-canopy-id" result.html
+                    |> Expect.equal True
+        , test "preserves the given status code" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPage
+                            { view = text ""
+                            , state = Encode.null
+                            , headContext = Head.init
+                            , statusCode = 404
+                            }
+                in
+                result.statusCode
+                    |> Expect.equal 404
+        , test "serializes state as provided" <|
+            \() ->
+                let
+                    state =
+                        Encode.object [ ( "page", Encode.string "home" ) ]
+
+                    result =
+                        Ssr.renderPage
+                            { view = text ""
+                            , state = state
+                            , headContext = Head.init
+                            , statusCode = 200
+                            }
+                in
+                result.state
+                    |> Encode.encode 0
+                    |> String.contains "home"
+                    |> Expect.equal True
+        , test "sets Content-Type header" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPage
+                            { view = text ""
+                            , state = Encode.null
+                            , headContext = Head.init
+                            , statusCode = 200
+                            }
+                in
+                List.member ( "Content-Type", "text/html; charset=utf-8" ) result.headers
+                    |> Expect.equal True
+        , test "renders head content from HeadContext" <|
+            \() ->
+                let
+                    ctx =
+                        Head.init
+                            |> Head.title "Test Page"
+                            |> Head.addMeta (Meta.description "A test")
+
+                    result =
+                        Ssr.renderPage
+                            { view = text ""
+                            , state = Encode.null
+                            , headContext = ctx
+                            , statusCode = 200
+                            }
+                in
+                (String.contains "<title>Test Page</title>" result.head
+                    && String.contains "description" result.head)
+                    |> Expect.equal True
+        , test "renders empty head for empty context" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPage
+                            { view = text ""
+                            , state = Encode.null
+                            , headContext = Head.init
+                            , statusCode = 200
+                            }
+                in
+                result.head
+                    |> Expect.equal ""
+        , test "renders nested VirtualDom structure" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPage
+                            { view = div [ class "outer" ] [ p [] [ text "Nested" ] ]
+                            , state = Encode.null
+                            , headContext = Head.init
+                            , statusCode = 200
+                            }
+                in
+                (String.contains "Nested" result.html
+                    && String.contains "outer" result.html)
+                    |> Expect.equal True
+        ]
+
+
+
+-- RENDER PAGE WITH HEAD
+
+
+renderPageWithHeadTests : Test
+renderPageWithHeadTests =
+    describe "renderPageWithHead"
+        [ test "renders HTML body from VirtualDom node" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = div [] [ text "World" ]
+                            , state = Encode.null
+                            , head = simpleHead
+                            , statusCode = 200
+                            }
+                in
+                String.contains "World" result.html
+                    |> Expect.equal True
+        , test "renders title from Head record" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = text ""
+                            , state = Encode.null
+                            , head = simpleHead
+                            , statusCode = 200
+                            }
+                in
+                String.contains "<title>My Page</title>" result.head
+                    |> Expect.equal True
+        , test "renders meta tags from Head record" <|
+            \() ->
+                let
+                    headRecord =
+                        { title = "Page"
+                        , meta = [ Meta.description "Desc", Meta.viewport "width=device-width" ]
+                        , links = []
+                        , scripts = []
+                        , structuredData = Nothing
+                        }
+
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = text ""
+                            , state = Encode.null
+                            , head = headRecord
+                            , statusCode = 200
+                            }
+                in
+                (String.contains "description" result.head
+                    && String.contains "viewport" result.head)
+                    |> Expect.equal True
+        , test "preserves status code" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = text ""
+                            , state = Encode.null
+                            , head = simpleHead
+                            , statusCode = 301
+                            }
+                in
+                result.statusCode
+                    |> Expect.equal 301
+        , test "sets Content-Type header" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = text ""
+                            , state = Encode.null
+                            , head = simpleHead
+                            , statusCode = 200
+                            }
+                in
+                List.member ( "Content-Type", "text/html; charset=utf-8" ) result.headers
+                    |> Expect.equal True
+        , test "renders structured data from Head record" <|
+            \() ->
+                let
+                    headRecord =
+                        { title = "Article"
+                        , meta = []
+                        , links = []
+                        , scripts = []
+                        , structuredData = Just (Encode.object [ ( "type", Encode.string "Article" ) ])
+                        }
+
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = text ""
+                            , state = Encode.null
+                            , head = headRecord
+                            , statusCode = 200
+                            }
+                in
+                String.contains "application/ld+json" result.head
+                    |> Expect.equal True
+        , test "handles Head with no structured data" <|
+            \() ->
+                let
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = text ""
+                            , state = Encode.null
+                            , head = simpleHead
+                            , statusCode = 200
+                            }
+                in
+                String.contains "application/ld+json" result.head
+                    |> Expect.equal False
+        ]
+
+
+simpleHead : Head.Head
+simpleHead =
+    { title = "My Page"
+    , meta = []
+    , links = []
+    , scripts = []
+    , structuredData = Nothing
+    }
+
+
+
+-- ERROR TO STRING
+
+
+errorToStringTests : Test
+errorToStringTests =
+    describe "errorToString"
+        [ test "RouteNotFound includes the path" <|
+            \() ->
+                Ssr.errorToString (RouteNotFound "/missing")
+                    |> String.contains "/missing"
+                    |> Expect.equal True
+        , test "RouteNotFound includes error type" <|
+            \() ->
+                Ssr.errorToString (RouteNotFound "/x")
+                    |> String.contains "Route not found"
+                    |> Expect.equal True
+        , test "RenderError includes the message" <|
+            \() ->
+                Ssr.errorToString (RenderError "invalid node")
+                    |> String.contains "invalid node"
+                    |> Expect.equal True
+        , test "RenderError includes error type" <|
+            \() ->
+                Ssr.errorToString (RenderError "msg")
+                    |> String.contains "Render error"
+                    |> Expect.equal True
+        , test "SerializationError includes the message" <|
+            \() ->
+                Ssr.errorToString (SerializationError "encode failed")
+                    |> String.contains "encode failed"
+                    |> Expect.equal True
+        , test "SerializationError includes error type" <|
+            \() ->
+                Ssr.errorToString (SerializationError "msg")
+                    |> String.contains "Serialization error"
+                    |> Expect.equal True
+        ]
+
+
+
+-- BUILD HEAD
+
+
+buildHeadTests : Test
+buildHeadTests =
+    describe "buildHead"
+        [ test "sets the title" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "My Page"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+                in
+                head.title
+                    |> Expect.equal "My Page"
+        , test "includes description meta tag" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "A great page"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                String.contains "A great page" rendered
+                    |> Expect.equal True
+        , test "includes Open Graph title" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "OG Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                String.contains "og:title" rendered
+                    |> Expect.equal True
+        , test "includes Open Graph URL" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com/page"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                String.contains "https://example.com/page" rendered
+                    |> Expect.equal True
+        , test "includes og:site_name" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "My Site"
+                            , twitterHandle = Nothing
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                String.contains "My Site" rendered
+                    |> Expect.equal True
+        , test "includes Twitter card type" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                String.contains "summary_large_image" rendered
+                    |> Expect.equal True
+        , test "includes image meta when image provided" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Just "https://example.com/img.jpg"
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                (String.contains "og:image" rendered
+                    && String.contains "twitter:image" rendered
+                    && String.contains "https://example.com/img.jpg" rendered)
+                    |> Expect.equal True
+        , test "excludes image meta when image is Nothing" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                String.contains "og:image" rendered
+                    |> Expect.equal False
+        , test "includes twitter handle when provided" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Just "@mysite"
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                String.contains "@mysite" rendered
+                    |> Expect.equal True
+        , test "excludes twitter handle when Nothing" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+
+                    rendered =
+                        Meta.renderMetaTags head.meta
+                in
+                String.contains "twitter:site" rendered
+                    |> Expect.equal False
+        , test "has no links by default" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+                in
+                head.links
+                    |> List.length
+                    |> Expect.equal 0
+        , test "has no scripts by default" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+                in
+                head.scripts
+                    |> List.length
+                    |> Expect.equal 0
+        , test "has no structured data by default" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+                in
+                head.structuredData
+                    |> Expect.equal Nothing
+        , test "base meta count without image or twitter handle" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+                in
+                List.length head.meta
+                    |> Expect.equal 9
+        , test "meta count with image adds two tags" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Just "https://example.com/img.jpg"
+                            , siteName = "Site"
+                            , twitterHandle = Nothing
+                            }
+                in
+                List.length head.meta
+                    |> Expect.equal 11
+        , test "meta count with twitter handle adds one tag" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Nothing
+                            , siteName = "Site"
+                            , twitterHandle = Just "@handle"
+                            }
+                in
+                List.length head.meta
+                    |> Expect.equal 10
+        , test "meta count with both image and twitter handle" <|
+            \() ->
+                let
+                    head =
+                        Ssr.buildHead
+                            { title = "Title"
+                            , description = "Desc"
+                            , url = "https://example.com"
+                            , image = Just "https://example.com/img.jpg"
+                            , siteName = "Site"
+                            , twitterHandle = Just "@handle"
+                            }
+                in
+                List.length head.meta
+                    |> Expect.equal 12
+        ]
+
+
+renderResultConstructorTests : Test
+renderResultConstructorTests =
+    describe "RenderResult positional constructor"
+        [ test "constructs RenderResult with correct html field" <|
+            \() ->
+                let
+                    result =
+                        RenderResult "<div>hi</div>" "<title>T</title>" Encode.null 200 [ ( "Content-Type", "text/html" ) ]
+                in
+                result.html
+                    |> Expect.equal "<div>hi</div>"
+        , test "constructs RenderResult with correct head field" <|
+            \() ->
+                let
+                    result =
+                        RenderResult "<div>hi</div>" "<title>T</title>" Encode.null 200 []
+                in
+                result.head
+                    |> Expect.equal "<title>T</title>"
+        , test "constructs RenderResult with correct statusCode field" <|
+            \() ->
+                let
+                    result =
+                        RenderResult "" "" Encode.null 404 []
+                in
+                result.statusCode
+                    |> Expect.equal 404
+        , test "constructs RenderResult with correct headers field" <|
+            \() ->
+                let
+                    headers =
+                        [ ( "X-Custom", "val" ) ]
+
+                    result =
+                        RenderResult "" "" Encode.null 200 headers
+                in
+                result.headers
+                    |> Expect.equal [ ( "X-Custom", "val" ) ]
+        ]
+
+
+renderPageWithHeadLinksAndScriptsTests : Test
+renderPageWithHeadLinksAndScriptsTests =
+    describe "renderPageWithHead links and scripts"
+        [ test "renders link tags from Head record" <|
+            \() ->
+                let
+                    headRecord =
+                        { title = "Page"
+                        , meta = []
+                        , links = [ Meta.Canonical "https://example.com" ]
+                        , scripts = []
+                        , structuredData = Nothing
+                        }
+
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = text ""
+                            , state = Encode.null
+                            , head = headRecord
+                            , statusCode = 200
+                            }
+                in
+                String.contains "canonical" result.head
+                    |> Expect.equal True
+        , test "renders script tags from Head record" <|
+            \() ->
+                let
+                    headRecord =
+                        { title = "Page"
+                        , meta = []
+                        , links = []
+                        , scripts = [ Meta.ExternalScript "/app.js" ]
+                        , structuredData = Nothing
+                        }
+
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = text ""
+                            , state = Encode.null
+                            , head = headRecord
+                            , statusCode = 200
+                            }
+                in
+                String.contains "/app.js" result.head
+                    |> Expect.equal True
+        , test "renders links and scripts together from Head record" <|
+            \() ->
+                let
+                    headRecord =
+                        { title = "Full"
+                        , meta = [ Meta.description "Desc" ]
+                        , links = [ Meta.Stylesheet "/style.css", Meta.Canonical "https://example.com" ]
+                        , scripts = [ Meta.ExternalScript "/bundle.js", Meta.InlineScript "console.log('hi')" ]
+                        , structuredData = Just (Encode.object [ ( "type", Encode.string "WebPage" ) ])
+                        }
+
+                    result =
+                        Ssr.renderPageWithHead
+                            { view = div [] [ text "Full page" ]
+                            , state = Encode.null
+                            , head = headRecord
+                            , statusCode = 200
+                            }
+                in
+                (String.contains "/style.css" result.head
+                    && String.contains "canonical" result.head
+                    && String.contains "/bundle.js" result.head
+                    && String.contains "console.log" result.head
+                    && String.contains "application/ld+json" result.head
+                    && String.contains "<title>Full</title>" result.head)
+                    |> Expect.equal True
+        ]

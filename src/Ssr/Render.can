@@ -1,0 +1,110 @@
+module Ssr.Render exposing
+    ( toString
+    , toPrettyString
+    , toHydratableString
+    , toDocument
+    , escapeHtml
+    , styleToString
+    , resetIdCounter
+    )
+
+
+{-| Server-side rendering of VirtualDom nodes to HTML strings.
+
+This module converts Canopy's VirtualDom tree into HTML strings suitable
+for server-side rendering. It handles text escaping, attribute serialization,
+void elements, and optional hydration markers.
+
+# Rendering
+@docs toString, toPrettyString, toHydratableString
+
+# Document
+@docs toDocument
+
+# Utilities
+@docs escapeHtml, styleToString, resetIdCounter
+
+-}
+
+
+import VirtualDom
+
+
+foreign import javascript "external/ssr.js" as SsrFFI
+
+
+{-| Render a VirtualDom node to an HTML string.
+
+    import Html exposing (div, text)
+
+    toString (div [] [ text "Hello" ])
+    --> "<div>Hello</div>"
+-}
+toString : VirtualDom.Node msg -> String
+toString =
+    SsrFFI.toString
+
+
+{-| Render a VirtualDom node to a pretty-printed HTML string with indentation.
+
+The Int argument specifies the number of spaces per indentation level.
+-}
+toPrettyString : Int -> VirtualDom.Node msg -> String
+toPrettyString =
+    SsrFFI.toPrettyString
+
+
+{-| Render a VirtualDom node with hydration markers.
+
+Each element gets a `data-canopy-id` attribute that allows the client-side
+hydration algorithm to match DOM nodes to their VirtualDom counterparts
+without re-rendering.
+-}
+toHydratableString : VirtualDom.Node msg -> String
+toHydratableString =
+    SsrFFI.toHydratableString
+
+
+{-| Render a complete HTML document with head content, body, serialized
+application state, and a client script tag.
+
+The state is embedded as a JSON script tag that the client reads during
+hydration to reconstruct the model without re-fetching data.
+-}
+toDocument :
+    { title : String
+    , headContent : String
+    , body : VirtualDom.Node msg
+    , stateJson : String
+    , clientScript : String
+    }
+    -> String
+toDocument config =
+    SsrFFI.toDocument config.title config.headContent config.body config.stateJson config.clientScript
+
+
+{-| Escape HTML special characters in text content.
+
+Replaces `&`, `<`, `>`, `"`, and `'` with their HTML entity equivalents
+to prevent XSS attacks and ensure text is rendered literally.
+-}
+escapeHtml : String -> String
+escapeHtml =
+    SsrFFI.escapeHtml
+
+
+{-| Render a list of CSS property/value pairs to an inline style string.
+
+    styleToString [ ( "color", "red" ), ( "font-size", "16px" ) ]
+    --> "color: red; font-size: 16px"
+-}
+styleToString : List ( String, String ) -> String
+styleToString =
+    SsrFFI.styleToString
+
+
+{-| Reset the hydration ID counter. Used in tests to get deterministic output.
+-}
+resetIdCounter : () -> ()
+resetIdCounter =
+    SsrFFI.resetIdCounter

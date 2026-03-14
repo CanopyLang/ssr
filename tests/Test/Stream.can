@@ -1,0 +1,358 @@
+module Test.Stream exposing (main, tests)
+
+import Basics exposing (..)
+import Html exposing (div, text, p, span)
+import Html.Attributes exposing (class)
+import Ssr.Stream as Stream exposing (Chunk(..), StreamResult)
+import Test exposing (..)
+import Expect
+
+
+main : Test
+main =
+    tests
+
+
+tests : Test
+tests =
+    describe "Ssr.Stream"
+        [ renderChunkedTests
+        , renderShellTests
+        , renderSuspensePlaceholderTests
+        , renderSuspenseReplacementTests
+        , assembleChunksTests
+        , streamResultConstructorTests
+        ]
+
+
+
+-- RENDER CHUNKED
+
+
+renderChunkedTests : Test
+renderChunkedTests =
+    describe "renderChunked"
+        [ test "small content returns a single chunk" <|
+            \() ->
+                let
+                    result =
+                        Stream.renderChunked 1024 (div [] [ text "Hello" ])
+                in
+                List.length result.chunks
+                    |> Expect.equal 1
+        , test "single chunk contains the rendered HTML" <|
+            \() ->
+                let
+                    result =
+                        Stream.renderChunked 1024 (div [] [ text "Hello" ])
+                in
+                Stream.assembleChunks result.chunks
+                    |> String.contains "Hello"
+                    |> Expect.equal True
+        , test "single chunk wraps content in div tags" <|
+            \() ->
+                let
+                    result =
+                        Stream.renderChunked 1024 (div [] [ text "Hello" ])
+
+                    assembled =
+                        Stream.assembleChunks result.chunks
+                in
+                (String.contains "<div>" assembled
+                    && String.contains "</div>" assembled)
+                    |> Expect.equal True
+        , test "large content is split into multiple chunks" <|
+            \() ->
+                let
+                    longContent =
+                        String.repeat 200 "word "
+
+                    result =
+                        Stream.renderChunked 50 (div [] [ text longContent ])
+                in
+                (List.length result.chunks > 1)
+                    |> Expect.equal True
+        , test "all chunks are HtmlChunks" <|
+            \() ->
+                let
+                    longContent =
+                        String.repeat 200 "x"
+
+                    result =
+                        Stream.renderChunked 50 (div [] [ text longContent ])
+
+                    allHtml =
+                        List.all isHtmlChunk result.chunks
+                in
+                allHtml
+                    |> Expect.equal True
+        , test "assembled chunks match original render" <|
+            \() ->
+                let
+                    node =
+                        div [ class "test" ] [ p [] [ text "Paragraph" ] ]
+
+                    result =
+                        Stream.renderChunked 10 node
+
+                    assembled =
+                        Stream.assembleChunks result.chunks
+                in
+                (String.contains "Paragraph" assembled
+                    && String.contains "test" assembled)
+                    |> Expect.equal True
+        , test "chunk size of 1 produces many chunks" <|
+            \() ->
+                let
+                    result =
+                        Stream.renderChunked 1 (div [] [ text "ABCDE" ])
+                in
+                (List.length result.chunks > 1)
+                    |> Expect.equal True
+        , test "very large chunk size returns single chunk" <|
+            \() ->
+                let
+                    result =
+                        Stream.renderChunked 999999 (div [] [ text "Small" ])
+                in
+                List.length result.chunks
+                    |> Expect.equal 1
+        , test "renders nested elements across chunks correctly" <|
+            \() ->
+                let
+                    node =
+                        div []
+                            [ div [] [ text (String.repeat 100 "A") ]
+                            , div [] [ text (String.repeat 100 "B") ]
+                            ]
+
+                    result =
+                        Stream.renderChunked 50 node
+
+                    assembled =
+                        Stream.assembleChunks result.chunks
+                in
+                (String.contains (String.repeat 100 "A") assembled
+                    && String.contains (String.repeat 100 "B") assembled)
+                    |> Expect.equal True
+        , test "handles content without angle brackets for chunking" <|
+            \() ->
+                let
+                    node =
+                        text (String.repeat 200 "x")
+
+                    result =
+                        Stream.renderChunked 50 node
+
+                    assembled =
+                        Stream.assembleChunks result.chunks
+                in
+                assembled
+                    |> Expect.equal (String.repeat 200 "x")
+        ]
+
+
+isHtmlChunk : Chunk -> Bool
+isHtmlChunk chunk =
+    case chunk of
+        HtmlChunk _ ->
+            True
+
+        SuspenseChunk _ _ ->
+            False
+
+
+
+-- RENDER SHELL
+
+
+renderShellTests : Test
+renderShellTests =
+    describe "renderShell"
+        [ test "includes DOCTYPE" <|
+            \() ->
+                Stream.renderShell "Page" ""
+                    |> String.contains "<!DOCTYPE html>"
+                    |> Expect.equal True
+        , test "includes html tag" <|
+            \() ->
+                Stream.renderShell "Page" ""
+                    |> String.contains "<html>"
+                    |> Expect.equal True
+        , test "includes head tag" <|
+            \() ->
+                Stream.renderShell "Page" ""
+                    |> String.contains "<head>"
+                    |> Expect.equal True
+        , test "includes title" <|
+            \() ->
+                Stream.renderShell "My App" ""
+                    |> String.contains "<title>My App</title>"
+                    |> Expect.equal True
+        , test "includes head content" <|
+            \() ->
+                Stream.renderShell "Page" "<meta charset=\"utf-8\" />"
+                    |> String.contains "<meta charset=\"utf-8\" />"
+                    |> Expect.equal True
+        , test "includes body tag" <|
+            \() ->
+                Stream.renderShell "Page" ""
+                    |> String.contains "<body>"
+                    |> Expect.equal True
+        , test "empty head content produces valid shell" <|
+            \() ->
+                let
+                    shell = Stream.renderShell "Title" ""
+                in
+                (String.contains "<!DOCTYPE html>" shell
+                    && String.contains "<title>Title</title>" shell
+                    && String.contains "<body>" shell)
+                    |> Expect.equal True
+        ]
+
+
+
+-- RENDER SUSPENSE PLACEHOLDER
+
+
+renderSuspensePlaceholderTests : Test
+renderSuspensePlaceholderTests =
+    describe "renderSuspensePlaceholder"
+        [ test "wraps fallback in div with id" <|
+            \() ->
+                Stream.renderSuspensePlaceholder "comments" "<p>Loading...</p>"
+                    |> Expect.equal "<div id=\"comments\"><p>Loading...</p></div>"
+        , test "uses provided placeholder id" <|
+            \() ->
+                Stream.renderSuspensePlaceholder "sidebar" "Loading"
+                    |> String.contains "id=\"sidebar\""
+                    |> Expect.equal True
+        , test "includes fallback HTML" <|
+            \() ->
+                Stream.renderSuspensePlaceholder "widget" "<span>Please wait</span>"
+                    |> String.contains "Please wait"
+                    |> Expect.equal True
+        , test "produces valid HTML structure" <|
+            \() ->
+                let
+                    result = Stream.renderSuspensePlaceholder "test" "content"
+                in
+                (String.startsWith "<div" result
+                    && String.endsWith "</div>" result)
+                    |> Expect.equal True
+        ]
+
+
+
+-- RENDER SUSPENSE REPLACEMENT
+
+
+renderSuspenseReplacementTests : Test
+renderSuspenseReplacementTests =
+    describe "renderSuspenseReplacement"
+        [ test "includes template element with id" <|
+            \() ->
+                Stream.renderSuspenseReplacement "comments" "<div>Real comments</div>"
+                    |> String.contains "id=\"comments-content\""
+                    |> Expect.equal True
+        , test "includes replacement content" <|
+            \() ->
+                Stream.renderSuspenseReplacement "widget" "<p>Loaded widget</p>"
+                    |> String.contains "Loaded widget"
+                    |> Expect.equal True
+        , test "includes script for DOM replacement" <|
+            \() ->
+                Stream.renderSuspenseReplacement "nav" "<nav>Menu</nav>"
+                    |> String.contains "<script>"
+                    |> Expect.equal True
+        , test "script references placeholder id" <|
+            \() ->
+                Stream.renderSuspenseReplacement "sidebar" "<div>Sidebar</div>"
+                    |> String.contains "getElementById('sidebar')"
+                    |> Expect.equal True
+        , test "script references content template id" <|
+            \() ->
+                Stream.renderSuspenseReplacement "footer" "<footer>F</footer>"
+                    |> String.contains "getElementById('footer-content')"
+                    |> Expect.equal True
+        , test "starts with template tag" <|
+            \() ->
+                Stream.renderSuspenseReplacement "test" "html"
+                    |> String.startsWith "<template"
+                    |> Expect.equal True
+        ]
+
+
+
+-- ASSEMBLE CHUNKS
+
+
+assembleChunksTests : Test
+assembleChunksTests =
+    describe "assembleChunks"
+        [ test "assembles empty list to empty string" <|
+            \() ->
+                Stream.assembleChunks []
+                    |> Expect.equal ""
+        , test "assembles single HtmlChunk" <|
+            \() ->
+                Stream.assembleChunks [ HtmlChunk "<div>Hello</div>" ]
+                    |> Expect.equal "<div>Hello</div>"
+        , test "concatenates multiple HtmlChunks" <|
+            \() ->
+                Stream.assembleChunks
+                    [ HtmlChunk "<div>"
+                    , HtmlChunk "Hello"
+                    , HtmlChunk "</div>"
+                    ]
+                    |> Expect.equal "<div>Hello</div>"
+        , test "assembles SuspenseChunk as placeholder plus content" <|
+            \() ->
+                Stream.assembleChunks [ SuspenseChunk "PLACEHOLDER" "CONTENT" ]
+                    |> Expect.equal "PLACEHOLDERCONTENT"
+        , test "assembles mixed chunk types" <|
+            \() ->
+                Stream.assembleChunks
+                    [ HtmlChunk "<header>H</header>"
+                    , SuspenseChunk "<div>Loading</div>" "<div>Loaded</div>"
+                    , HtmlChunk "<footer>F</footer>"
+                    ]
+                    |> Expect.equal "<header>H</header><div>Loading</div><div>Loaded</div><footer>F</footer>"
+        , test "preserves order of chunks" <|
+            \() ->
+                let
+                    result =
+                        Stream.assembleChunks
+                            [ HtmlChunk "A"
+                            , HtmlChunk "B"
+                            , HtmlChunk "C"
+                            ]
+                in
+                result
+                    |> Expect.equal "ABC"
+        ]
+
+
+streamResultConstructorTests : Test
+streamResultConstructorTests =
+    describe "StreamResult positional constructor"
+        [ test "constructs StreamResult with correct chunks" <|
+            \() ->
+                let
+                    chunks =
+                        [ HtmlChunk "<div>A</div>", HtmlChunk "<div>B</div>" ]
+
+                    result =
+                        StreamResult chunks
+                in
+                List.length result.chunks
+                    |> Expect.equal 2
+        , test "constructs StreamResult and assembles correctly" <|
+            \() ->
+                let
+                    result =
+                        StreamResult [ HtmlChunk "Hello", HtmlChunk " World" ]
+                in
+                Stream.assembleChunks result.chunks
+                    |> Expect.equal "Hello World"
+        ]

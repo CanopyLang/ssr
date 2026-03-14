@@ -1,0 +1,311 @@
+module Ssr.Meta exposing
+    ( MetaTag(..)
+    , LinkTag(..)
+    , ScriptTag(..)
+    , description
+    , keywords
+    , robots
+    , viewport
+    , ogTitle
+    , ogDescription
+    , ogImage
+    , ogUrl
+    , ogType
+    , ogSiteName
+    , ogLocale
+    , twitterCard
+    , twitterTitle
+    , twitterDescription
+    , twitterImage
+    , twitterSite
+    , renderMetaTag
+    , renderMetaTags
+    , renderLinkTag
+    , renderLinkTags
+    , renderScriptTag
+    , renderScriptTags
+    )
+
+
+{-| Meta tag management for SEO and social sharing.
+
+Provides builders for common meta tags (Open Graph, Twitter Card, SEO)
+and renderers that convert them to HTML strings for server-side rendering.
+
+# Types
+@docs MetaTag, LinkTag, ScriptTag
+
+# SEO Meta Tags
+@docs description, keywords, robots, viewport
+
+# Open Graph
+@docs ogTitle, ogDescription, ogImage, ogUrl, ogType, ogSiteName, ogLocale
+
+# Twitter Card
+@docs twitterCard, twitterTitle, twitterDescription, twitterImage, twitterSite
+
+# Rendering
+@docs renderMetaTag, renderMetaTags, renderLinkTag, renderLinkTags
+@docs renderScriptTag, renderScriptTags
+
+-}
+
+
+import Json.Encode as Encode
+import Ssr.Render as Render
+
+
+{-| Represents an HTML meta tag. Each variant maps to a different meta tag format. -}
+type MetaTag
+    = NameContent String String
+    | PropertyContent String String
+    | HttpEquiv String String
+    | Charset String
+
+
+{-| Represents an HTML link tag for document relationships. -}
+type LinkTag
+    = Canonical String
+    | Alternate String String
+    | Stylesheet String
+    | Preload String String
+    | Icon String String String
+    | CustomLink (List ( String, String ))
+
+
+{-| Represents an HTML script tag for inline or external scripts. -}
+type ScriptTag
+    = InlineScript String
+    | ExternalScript String
+    | ModuleScript String
+    | JsonLd Encode.Value
+
+
+
+-- SEO META TAGS
+
+
+{-| Create a meta description tag for search engine results.
+
+    description "A blog about functional programming"
+-}
+description : String -> MetaTag
+description value =
+    NameContent "description" value
+
+
+{-| Create a meta keywords tag.
+
+    keywords [ "canopy", "ssr", "functional" ]
+-}
+keywords : List String -> MetaTag
+keywords words =
+    NameContent "keywords" (String.join ", " words)
+
+
+{-| Create a meta robots directive tag.
+
+    robots "index, follow"
+-}
+robots : String -> MetaTag
+robots value =
+    NameContent "robots" value
+
+
+{-| Create a meta viewport tag for responsive design.
+
+    viewport "width=device-width, initial-scale=1"
+-}
+viewport : String -> MetaTag
+viewport value =
+    NameContent "viewport" value
+
+
+
+-- OPEN GRAPH
+
+
+{-| Open Graph title for social sharing previews. -}
+ogTitle : String -> MetaTag
+ogTitle value =
+    PropertyContent "og:title" value
+
+
+{-| Open Graph description for social sharing previews. -}
+ogDescription : String -> MetaTag
+ogDescription value =
+    PropertyContent "og:description" value
+
+
+{-| Open Graph image URL for social sharing previews. -}
+ogImage : String -> MetaTag
+ogImage value =
+    PropertyContent "og:image" value
+
+
+{-| Open Graph canonical URL. -}
+ogUrl : String -> MetaTag
+ogUrl value =
+    PropertyContent "og:url" value
+
+
+{-| Open Graph content type (e.g. "website", "article"). -}
+ogType : String -> MetaTag
+ogType value =
+    PropertyContent "og:type" value
+
+
+{-| Open Graph site name. -}
+ogSiteName : String -> MetaTag
+ogSiteName value =
+    PropertyContent "og:site_name" value
+
+
+{-| Open Graph locale (e.g. "en_US"). -}
+ogLocale : String -> MetaTag
+ogLocale value =
+    PropertyContent "og:locale" value
+
+
+
+-- TWITTER CARD
+
+
+{-| Twitter card type: "summary", "summary_large_image", "app", or "player". -}
+twitterCard : String -> MetaTag
+twitterCard value =
+    NameContent "twitter:card" value
+
+
+{-| Twitter card title. -}
+twitterTitle : String -> MetaTag
+twitterTitle value =
+    NameContent "twitter:title" value
+
+
+{-| Twitter card description. -}
+twitterDescription : String -> MetaTag
+twitterDescription value =
+    NameContent "twitter:description" value
+
+
+{-| Twitter card image URL. -}
+twitterImage : String -> MetaTag
+twitterImage value =
+    NameContent "twitter:image" value
+
+
+{-| Twitter card site handle (e.g. "@myblog"). -}
+twitterSite : String -> MetaTag
+twitterSite value =
+    NameContent "twitter:site" value
+
+
+
+-- RENDERING
+
+
+{-| Render a single MetaTag to its HTML string representation. -}
+renderMetaTag : MetaTag -> String
+renderMetaTag tag =
+    renderMetaTagHelper tag
+
+
+renderMetaTagHelper : MetaTag -> String
+renderMetaTagHelper tag =
+    case tag of
+        NameContent name value ->
+            "<meta name=\"" ++ Render.escapeHtml name ++ "\" content=\"" ++ Render.escapeHtml value ++ "\" />"
+
+        PropertyContent prop value ->
+            "<meta property=\"" ++ Render.escapeHtml prop ++ "\" content=\"" ++ Render.escapeHtml value ++ "\" />"
+
+        HttpEquiv equiv value ->
+            "<meta http-equiv=\"" ++ Render.escapeHtml equiv ++ "\" content=\"" ++ Render.escapeHtml value ++ "\" />"
+
+        Charset cs ->
+            "<meta charset=\"" ++ Render.escapeHtml cs ++ "\" />"
+
+
+{-| Render a list of MetaTags to a newline-separated HTML string. -}
+renderMetaTags : List MetaTag -> String
+renderMetaTags tags =
+    tags
+        |> List.map renderMetaTag
+        |> String.join "\n"
+
+
+{-| Render a single LinkTag to its HTML string representation. -}
+renderLinkTag : LinkTag -> String
+renderLinkTag tag =
+    renderLinkTagHelper tag
+
+
+renderLinkTagHelper : LinkTag -> String
+renderLinkTagHelper tag =
+    case tag of
+        Canonical url ->
+            "<link rel=\"canonical\" href=\"" ++ Render.escapeHtml url ++ "\" />"
+
+        Alternate lang url ->
+            "<link rel=\"alternate\" hreflang=\"" ++ Render.escapeHtml lang ++ "\" href=\"" ++ Render.escapeHtml url ++ "\" />"
+
+        Stylesheet url ->
+            "<link rel=\"stylesheet\" href=\"" ++ Render.escapeHtml url ++ "\" />"
+
+        Preload url asType ->
+            "<link rel=\"preload\" href=\"" ++ Render.escapeHtml url ++ "\" as=\"" ++ Render.escapeHtml asType ++ "\" />"
+
+        Icon iconType iconUrl size ->
+            "<link rel=\"icon\" type=\"" ++ Render.escapeHtml iconType ++ "\" href=\"" ++ Render.escapeHtml iconUrl ++ "\" sizes=\"" ++ Render.escapeHtml size ++ "\" />"
+
+        CustomLink attrs ->
+            "<link" ++ renderCustomAttrs attrs ++ " />"
+
+
+renderCustomAttrs : List ( String, String ) -> String
+renderCustomAttrs attrs =
+    case attrs of
+        [] ->
+            ""
+
+        first :: rest ->
+            " " ++ Tuple.first first ++ "=\"" ++ Render.escapeHtml (Tuple.second first) ++ "\"" ++ renderCustomAttrs rest
+
+
+{-| Render a list of LinkTags to a newline-separated HTML string. -}
+renderLinkTags : List LinkTag -> String
+renderLinkTags tags =
+    tags
+        |> List.map renderLinkTag
+        |> String.join "\n"
+
+
+{-| Render a single ScriptTag to its HTML string representation. -}
+renderScriptTag : ScriptTag -> String
+renderScriptTag tag =
+    renderScriptTagHelper tag
+
+
+renderScriptTagHelper : ScriptTag -> String
+renderScriptTagHelper tag =
+    case tag of
+        InlineScript code ->
+            "<script>" ++ code ++ "</script>"
+
+        ExternalScript url ->
+            "<script src=\"" ++ Render.escapeHtml url ++ "\"></script>"
+
+        ModuleScript url ->
+            "<script type=\"module\" src=\"" ++ Render.escapeHtml url ++ "\"></script>"
+
+        JsonLd value ->
+            "<script type=\"application/ld+json\">" ++ Encode.encode 0 value ++ "</script>"
+
+
+{-| Render a list of ScriptTags to a newline-separated HTML string. -}
+renderScriptTags : List ScriptTag -> String
+renderScriptTags tags =
+    tags
+        |> List.map renderScriptTag
+        |> String.join "\n"

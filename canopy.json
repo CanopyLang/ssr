@@ -1,0 +1,28 @@
+{
+    "type": "package",
+    "name": "canopy/ssr",
+    "summary": "Server-side rendering, hydration, meta tags, static site generation, and islands architecture",
+    "license": "BSD-3-Clause",
+    "version": "1.0.0",
+    "exposed-modules": [
+        "Ssr",
+        "Ssr.Render",
+        "Ssr.Meta",
+        "Ssr.Head",
+        "Ssr.Static",
+        "Ssr.Island",
+        "Ssr.Stream"
+    ],
+    "canopy-version": "0.19.0 <= v < 0.20.0",
+    "dependencies": {
+        "canopy/core": "1.0.0 <= v < 2.0.0",
+        "canopy/html": "1.0.0 <= v < 2.0.0",
+        "canopy/json": "1.0.0 <= v < 2.0.0",
+        "canopy/virtual-dom": "1.0.0 <= v < 2.0.0",
+        "canopy/url": "1.0.0 <= v < 2.0.0",
+        "canopy/svg": "1.0.0 <= v < 2.0.0"
+    },
+    "test-dependencies": {
+        "canopy/test": "1.0.0 <= v < 3.0.0"
+    }
+}

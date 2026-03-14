@@ -1,0 +1,184 @@
+module Ssr.Head exposing
+    ( HeadContext
+    , Head
+    , init
+    , title
+    , addMeta
+    , addLink
+    , addScript
+    , setStructuredData
+    , merge
+    , render
+    , toHead
+    )
+
+
+{-| Document head management across routes.
+
+Accumulates head elements (title, meta tags, link tags, scripts, structured
+data) from nested components and renders them to HTML for server-side rendering.
+
+# Types
+@docs HeadContext, Head
+
+# Build
+@docs init, title, addMeta, addLink, addScript, setStructuredData
+
+# Combine
+@docs merge
+
+# Output
+@docs render, toHead
+
+-}
+
+
+import Json.Encode as Encode
+import Ssr.Meta as Meta exposing (MetaTag, LinkTag, ScriptTag)
+
+
+{-| Configuration for a complete HTML document head section.
+
+Contains the page title, meta tags for SEO, link tags for stylesheets and
+relationships, script tags, and optional JSON-LD structured data.
+-}
+type alias Head =
+    { title : String
+    , meta : List MetaTag
+    , links : List LinkTag
+    , scripts : List ScriptTag
+    , structuredData : Maybe Encode.Value
+    }
+
+
+{-| Accumulated head elements from components. Uses a pipeline-friendly API
+for building up head content incrementally.
+-}
+type HeadContext
+    = HeadContext Head
+
+
+{-| Create an empty HeadContext with no title or tags. -}
+init : HeadContext
+init =
+    HeadContext
+        { title = ""
+        , meta = []
+        , links = []
+        , scripts = []
+        , structuredData = Nothing
+        }
+
+
+{-| Set the page title. If called multiple times, the last value wins. -}
+title : String -> HeadContext -> HeadContext
+title t (HeadContext head) =
+    HeadContext { head | title = t }
+
+
+{-| Add a meta tag to the head context. -}
+addMeta : MetaTag -> HeadContext -> HeadContext
+addMeta tag (HeadContext head) =
+    HeadContext { head | meta = head.meta ++ [ tag ] }
+
+
+{-| Add a link tag to the head context. -}
+addLink : LinkTag -> HeadContext -> HeadContext
+addLink tag (HeadContext head) =
+    HeadContext { head | links = head.links ++ [ tag ] }
+
+
+{-| Add a script tag to the head context. -}
+addScript : ScriptTag -> HeadContext -> HeadContext
+addScript tag (HeadContext head) =
+    HeadContext { head | scripts = head.scripts ++ [ tag ] }
+
+
+{-| Set JSON-LD structured data for search engine understanding. -}
+setStructuredData : Encode.Value -> HeadContext -> HeadContext
+setStructuredData value (HeadContext head) =
+    HeadContext { head | structuredData = Just value }
+
+
+{-| Merge two head contexts. The second context's title wins if non-empty.
+Meta tags, link tags, and script tags are concatenated. Structured data
+from the second context wins if present.
+-}
+merge : HeadContext -> HeadContext -> HeadContext
+merge (HeadContext a) (HeadContext b) =
+    HeadContext
+        { title = mergeTitle a.title b.title
+        , meta = a.meta ++ b.meta
+        , links = a.links ++ b.links
+        , scripts = a.scripts ++ b.scripts
+        , structuredData = mergeStructuredData a.structuredData b.structuredData
+        }
+
+
+mergeTitle : String -> String -> String
+mergeTitle a b =
+    if b == "" then
+        a
+    else
+        b
+
+
+mergeStructuredData : Maybe Encode.Value -> Maybe Encode.Value -> Maybe Encode.Value
+mergeStructuredData a b =
+    case b of
+        Just _ ->
+            b
+
+        Nothing ->
+            a
+
+
+{-| Render the accumulated head context to an HTML string suitable for
+embedding inside a `<head>` element. -}
+render : HeadContext -> String
+render (HeadContext head) =
+    let
+        titleHtml =
+            if head.title == "" then
+                ""
+            else
+                "<title>" ++ head.title ++ "</title>"
+
+        metaHtml =
+            Meta.renderMetaTags head.meta
+
+        linksHtml =
+            Meta.renderLinkTags head.links
+
+        scriptsHtml =
+            Meta.renderScriptTags head.scripts
+
+        structuredHtml =
+            renderStructuredData head.structuredData
+
+        parts =
+            List.filter isNonEmpty
+                [ titleHtml, metaHtml, linksHtml, scriptsHtml, structuredHtml ]
+    in
+    String.join "\n" parts
+
+
+isNonEmpty : String -> Bool
+isNonEmpty s =
+    s /= ""
+
+
+renderStructuredData : Maybe Encode.Value -> String
+renderStructuredData maybeValue =
+    case maybeValue of
+        Nothing ->
+            ""
+
+        Just value ->
+            "<script type=\"application/ld+json\">" ++ Encode.encode 0 value ++ "</script>"
+
+
+{-| Extract a Head record from a HeadContext for use with other APIs. -}
+toHead : HeadContext -> Head
+toHead (HeadContext head) =
+    head

@@ -1,0 +1,208 @@
+module Ssr.Static exposing
+    ( ChangeFrequency(..)
+    , StaticRoute
+    , GeneratedPage
+    , generateSitemap
+    , generateRobots
+    , changeFrequencyToString
+    )
+
+
+{-| Static site generation utilities.
+
+Provides sitemap.xml generation, robots.txt generation, and route
+configuration types for statically generating all pages at build time.
+
+# Types
+@docs ChangeFrequency, StaticRoute, GeneratedPage
+
+# Generators
+@docs generateSitemap, generateRobots
+
+# Utilities
+@docs changeFrequencyToString
+
+-}
+
+
+import Dict exposing (Dict)
+import Ssr.Render as Render
+
+
+{-| How frequently a page's content is expected to change, used in sitemaps
+to hint to search engine crawlers how often to re-index. -}
+type ChangeFrequency
+    = Always
+    | Hourly
+    | Daily
+    | Weekly
+    | Monthly
+    | Yearly
+    | Never
+
+
+{-| A route to be statically generated, with optional sitemap metadata. -}
+type alias StaticRoute =
+    { path : String
+    , params : Dict String String
+    , changeFrequency : Maybe ChangeFrequency
+    , priority : Maybe Float
+    }
+
+
+{-| Result of generating a static page, recording what was produced. -}
+type alias GeneratedPage =
+    { path : String
+    , url : String
+    , size : Int
+    }
+
+
+{-| Convert a ChangeFrequency to its sitemap XML string representation. -}
+changeFrequencyToString : ChangeFrequency -> String
+changeFrequencyToString freq =
+    changeFrequencyHelper freq
+
+
+changeFrequencyHelper : ChangeFrequency -> String
+changeFrequencyHelper freq =
+    case freq of
+        Always ->
+            "always"
+
+        Hourly ->
+            "hourly"
+
+        Daily ->
+            "daily"
+
+        Weekly ->
+            "weekly"
+
+        Monthly ->
+            "monthly"
+
+        Yearly ->
+            "yearly"
+
+        Never ->
+            "never"
+
+
+{-| Generate a sitemap.xml string from a base URL and list of static routes.
+
+The sitemap follows the Sitemaps 0.9 protocol and includes optional
+changefreq and priority elements when provided in the route configuration.
+
+    generateSitemap
+        { baseUrl = "https://example.com"
+        , routes =
+            [ { path = "/", params = Dict.empty
+              , changeFrequency = Just Daily, priority = Just 1.0 }
+            , { path = "/about", params = Dict.empty
+              , changeFrequency = Just Monthly, priority = Just 0.5 }
+            ]
+        }
+-}
+generateSitemap : { baseUrl : String, routes : List StaticRoute } -> String
+generateSitemap config =
+    let
+        header =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+
+        footer =
+            "</urlset>"
+
+        urls =
+            List.map (renderSitemapUrl config.baseUrl) config.routes
+    in
+    header ++ "\n" ++ String.join "\n" urls ++ "\n" ++ footer
+
+
+renderSitemapUrl : String -> StaticRoute -> String
+renderSitemapUrl baseUrl route =
+    let
+        loc =
+            "  <url>\n    <loc>" ++ Render.escapeHtml (baseUrl ++ route.path) ++ "</loc>"
+
+        freq =
+            renderOptionalFreq route.changeFrequency
+
+        pri =
+            renderOptionalPriority route.priority
+
+        parts =
+            List.filter isNonEmpty [ loc, freq, pri ]
+    in
+    String.join "\n" parts ++ "\n  </url>"
+
+
+renderOptionalFreq : Maybe ChangeFrequency -> String
+renderOptionalFreq maybeFreq =
+    case maybeFreq of
+        Nothing ->
+            ""
+
+        Just freq ->
+            "    <changefreq>" ++ changeFrequencyToString freq ++ "</changefreq>"
+
+
+renderOptionalPriority : Maybe Float -> String
+renderOptionalPriority maybePri =
+    case maybePri of
+        Nothing ->
+            ""
+
+        Just pri ->
+            "    <priority>" ++ String.fromFloat pri ++ "</priority>"
+
+
+isNonEmpty : String -> Bool
+isNonEmpty s =
+    s /= ""
+
+
+{-| Generate a robots.txt string from the given configuration.
+
+    generateRobots
+        { sitemapUrl = "https://example.com/sitemap.xml"
+        , allow = [ "/" ]
+        , disallow = [ "/admin/", "/private/" ]
+        , userAgent = "*"
+        }
+-}
+generateRobots :
+    { sitemapUrl : String
+    , allow : List String
+    , disallow : List String
+    , userAgent : String
+    }
+    -> String
+generateRobots config =
+    let
+        ua =
+            "User-agent: " ++ config.userAgent
+
+        allows =
+            List.map formatAllow config.allow
+
+        disallows =
+            List.map formatDisallow config.disallow
+
+        sitemap =
+            "Sitemap: " ++ config.sitemapUrl
+
+        lines =
+            [ ua ] ++ allows ++ disallows ++ [ "", sitemap ]
+    in
+    String.join "\n" lines
+
+
+formatAllow : String -> String
+formatAllow path =
+    "Allow: " ++ path
+
+
+formatDisallow : String -> String
+formatDisallow path =
+    "Disallow: " ++ path

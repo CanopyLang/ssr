@@ -1,0 +1,195 @@
+module Ssr.Stream exposing
+    ( Chunk(..)
+    , StreamResult
+    , renderChunked
+    , renderShell
+    , renderSuspensePlaceholder
+    , renderSuspenseReplacement
+    , assembleChunks
+    )
+
+
+{-| Streaming SSR for progressive HTML delivery.
+
+Provides utilities for splitting server-rendered HTML into chunks that can
+be sent progressively to the browser. Supports Suspense-like boundaries
+where a loading placeholder is sent immediately and replaced with actual
+content when it becomes available.
+
+# Types
+@docs Chunk, StreamResult
+
+# Rendering
+@docs renderChunked, renderShell
+
+# Suspense
+@docs renderSuspensePlaceholder, renderSuspenseReplacement
+
+# Assembly
+@docs assembleChunks
+
+-}
+
+
+import VirtualDom
+import Ssr.Render as Render
+
+
+{-| A chunk of HTML content in a streaming response.
+
+- `HtmlChunk`: A piece of HTML content to send
+- `SuspenseChunk`: A placeholder followed later by its replacement content
+-}
+type Chunk
+    = HtmlChunk String
+    | SuspenseChunk String String
+
+
+{-| The result of chunked rendering, containing ordered chunks to send. -}
+type alias StreamResult =
+    { chunks : List Chunk
+    }
+
+
+{-| Split rendered HTML into roughly equal-sized chunks for streaming.
+
+The chunkSize parameter is an approximate target in characters. The actual
+chunks may be larger to avoid splitting in the middle of an HTML tag.
+
+    renderChunked 1024 (div [] [ text "Hello" ])
+-}
+renderChunked : Int -> VirtualDom.Node msg -> StreamResult
+renderChunked chunkSize node =
+    let
+        html =
+            Render.toString node
+
+        chunks =
+            splitIntoChunks chunkSize html
+    in
+    { chunks = List.map HtmlChunk chunks }
+
+
+splitIntoChunks : Int -> String -> List String
+splitIntoChunks chunkSize html =
+    if String.length html <= chunkSize then
+        [ html ]
+    else
+        splitHelper chunkSize html []
+
+
+splitHelper : Int -> String -> List String -> List String
+splitHelper chunkSize remaining acc =
+    if String.length remaining <= chunkSize then
+        List.reverse (remaining :: acc)
+    else
+        let
+            candidate =
+                String.left chunkSize remaining
+
+            splitPoint =
+                findSafeSplitPoint candidate chunkSize
+
+            chunk =
+                String.left splitPoint remaining
+
+            rest =
+                String.dropLeft splitPoint remaining
+        in
+        splitHelper chunkSize rest (chunk :: acc)
+
+
+findSafeSplitPoint : String -> Int -> Int
+findSafeSplitPoint candidate size =
+    let
+        lastGt =
+            lastIndexOf '>' candidate
+    in
+    if lastGt > 0 then
+        lastGt + 1
+    else
+        size
+
+
+lastIndexOf : Char -> String -> Int
+lastIndexOf ch str =
+    lastIndexOfHelper ch (String.toList str) 0 -1
+
+
+lastIndexOfHelper : Char -> List Char -> Int -> Int -> Int
+lastIndexOfHelper ch chars idx found =
+    case chars of
+        [] ->
+            found
+
+        c :: rest ->
+            if c == ch then
+                lastIndexOfHelper ch rest (idx + 1) idx
+            else
+                lastIndexOfHelper ch rest (idx + 1) found
+
+
+{-| Render the document shell (DOCTYPE, html, head, opening body tag) as the
+first chunk in a streaming response.
+
+    renderShell "My Page" "<meta charset=\"utf-8\" />"
+-}
+renderShell : String -> String -> String
+renderShell pageTitle headContent =
+    "<!DOCTYPE html>\n<html>\n<head>\n"
+        ++ headContent
+        ++ "\n<title>"
+        ++ pageTitle
+        ++ "</title>\n</head>\n<body>\n"
+
+
+{-| Render a Suspense-style loading placeholder with a unique ID.
+
+The placeholder will be visible until the corresponding replacement
+content arrives.
+
+    renderSuspensePlaceholder "comments" "<div>Loading comments...</div>"
+-}
+renderSuspensePlaceholder : String -> String -> String
+renderSuspensePlaceholder placeholderId fallbackHtml =
+    "<div id=\"" ++ placeholderId ++ "\">" ++ fallbackHtml ++ "</div>"
+
+
+{-| Render inline HTML and script that replaces a Suspense placeholder
+with actual content. Sent as a later chunk in the streaming response.
+
+    renderSuspenseReplacement "comments" "<div>Actual comments here</div>"
+-}
+renderSuspenseReplacement : String -> String -> String
+renderSuspenseReplacement placeholderId contentHtml =
+    "<template id=\"" ++ placeholderId ++ "-content\">"
+        ++ contentHtml
+        ++ "</template>\n<script>"
+        ++ "document.getElementById('" ++ placeholderId ++ "').outerHTML="
+        ++ "document.getElementById('" ++ placeholderId ++ "-content').innerHTML;"
+        ++ "</script>"
+
+
+{-| Assemble a list of chunks into a single HTML string.
+
+Useful for testing or for servers that don't support streaming and need
+the complete HTML at once.
+
+    assembleChunks [ HtmlChunk "<div>", HtmlChunk "Hello</div>" ]
+    --> "<div>Hello</div>"
+-}
+assembleChunks : List Chunk -> String
+assembleChunks chunks =
+    chunks
+        |> List.map chunkToString
+        |> String.join ""
+
+
+chunkToString : Chunk -> String
+chunkToString chunk =
+    case chunk of
+        HtmlChunk html ->
+            html
+
+        SuspenseChunk placeholder_ content ->
+            placeholder_ ++ content

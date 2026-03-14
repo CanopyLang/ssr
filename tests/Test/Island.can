@@ -1,0 +1,248 @@
+module Test.Island exposing (main, tests)
+
+import Basics exposing (..)
+import Json.Encode as Encode
+import Json.Decode as Decode
+import Html exposing (div, text)
+import Ssr.Island as Island exposing (HydrationDirective(..), Island)
+import Ssr.Render as Render
+import Test exposing (..)
+import Expect
+
+
+main : Test
+main =
+    tests
+
+
+tests : Test
+tests =
+    describe "Ssr.Island"
+        [ placeholderTests
+        , renderIslandWrapperTests
+        , directiveToStringTests
+        , withDirectiveTests
+        , islandConstructorTests
+        ]
+
+
+
+-- PLACEHOLDER
+
+
+placeholderTests : Test
+placeholderTests =
+    describe "placeholder"
+        [ test "wraps fallback in island div" <|
+            \() ->
+                let
+                    html = Island.placeholder
+                        { island = "counter"
+                        , props = Encode.null
+                        , fallback = text "Loading..."
+                        }
+                    result = Render.toString html
+                in
+                String.contains "data-canopy-island" result
+                    |> Expect.equal True
+        , test "includes island id" <|
+            \() ->
+                let
+                    html = Island.placeholder
+                        { island = "newsletter"
+                        , props = Encode.null
+                        , fallback = text "Subscribe"
+                        }
+                    result = Render.toString html
+                in
+                String.contains "newsletter" result
+                    |> Expect.equal True
+        , test "includes props as JSON" <|
+            \() ->
+                let
+                    html = Island.placeholder
+                        { island = "widget"
+                        , props = Encode.object [ ( "count", Encode.int 42 ) ]
+                        , fallback = text "Loading"
+                        }
+                    result = Render.toString html
+                in
+                String.contains "42" result
+                    |> Expect.equal True
+        , test "includes fallback content" <|
+            \() ->
+                let
+                    html = Island.placeholder
+                        { island = "search"
+                        , props = Encode.null
+                        , fallback = div [] [ text "Search placeholder" ]
+                        }
+                    result = Render.toString html
+                in
+                String.contains "Search placeholder" result
+                    |> Expect.equal True
+        , test "renders nested fallback" <|
+            \() ->
+                let
+                    html = Island.placeholder
+                        { island = "complex"
+                        , props = Encode.null
+                        , fallback = div [] [ div [] [ text "Nested" ] ]
+                        }
+                    result = Render.toString html
+                in
+                String.contains "Nested" result
+                    |> Expect.equal True
+        ]
+
+
+
+-- RENDER ISLAND WRAPPER
+
+
+renderIslandWrapperTests : Test
+renderIslandWrapperTests =
+    describe "renderIslandWrapper"
+        [ test "includes island id" <|
+            \() ->
+                Island.renderIslandWrapper "comments" "{}" OnLoad "<p>Loading</p>"
+                    |> String.contains "data-canopy-island=\"comments\""
+                    |> Expect.equal True
+        , test "includes props" <|
+            \() ->
+                Island.renderIslandWrapper "widget" "{\"x\":1}" OnLoad "<div></div>"
+                    |> String.contains "{\"x\":1}"
+                    |> Expect.equal True
+        , test "includes hydration directive" <|
+            \() ->
+                Island.renderIslandWrapper "nav" "{}" OnVisible "<nav></nav>"
+                    |> String.contains "data-canopy-hydrate=\"visible\""
+                    |> Expect.equal True
+        , test "includes fallback HTML" <|
+            \() ->
+                Island.renderIslandWrapper "form" "{}" OnIdle "<form>Static form</form>"
+                    |> String.contains "Static form"
+                    |> Expect.equal True
+        , test "wraps in div" <|
+            \() ->
+                let
+                    result = Island.renderIslandWrapper "test" "{}" OnLoad "content"
+                in
+                (String.startsWith "<div" result
+                    && String.endsWith "</div>" result)
+                    |> Expect.equal True
+        , test "includes OnInteraction directive" <|
+            \() ->
+                Island.renderIslandWrapper "form" "{}" OnInteraction "<form></form>"
+                    |> String.contains "data-canopy-hydrate=\"interaction\""
+                    |> Expect.equal True
+        , test "includes OnMediaQuery directive with query string" <|
+            \() ->
+                Island.renderIslandWrapper "responsive" "{}" (OnMediaQuery "(min-width: 1024px)") "<div></div>"
+                    |> String.contains "data-canopy-hydrate=\"media:(min-width: 1024px)\""
+                    |> Expect.equal True
+        ]
+
+
+
+-- DIRECTIVE TO STRING
+
+
+directiveToStringTests : Test
+directiveToStringTests =
+    describe "directiveToString"
+        [ test "OnLoad" <|
+            \() ->
+                Island.directiveToString OnLoad
+                    |> Expect.equal "load"
+        , test "OnVisible" <|
+            \() ->
+                Island.directiveToString OnVisible
+                    |> Expect.equal "visible"
+        , test "OnIdle" <|
+            \() ->
+                Island.directiveToString OnIdle
+                    |> Expect.equal "idle"
+        , test "OnInteraction" <|
+            \() ->
+                Island.directiveToString OnInteraction
+                    |> Expect.equal "interaction"
+        , test "OnMediaQuery" <|
+            \() ->
+                Island.directiveToString (OnMediaQuery "(min-width: 768px)")
+                    |> Expect.equal "media:(min-width: 768px)"
+        ]
+
+
+
+-- WITH DIRECTIVE
+
+
+withDirectiveTests : Test
+withDirectiveTests =
+    describe "withDirective"
+        [ test "returns island with same id" <|
+            \() ->
+                let
+                    island = testIsland "my-island"
+                    result = Island.withDirective OnVisible island
+                in
+                result.id
+                    |> Expect.equal "my-island"
+        , test "preserves island id after applying OnIdle" <|
+            \() ->
+                let
+                    island = testIsland "counter"
+                    result = Island.withDirective OnIdle island
+                in
+                result.id
+                    |> Expect.equal "counter"
+        ]
+
+
+testIsland : String -> Island () ()
+testIsland islandId =
+    { id = islandId
+    , init = \_ -> ( (), Cmd.none )
+    , update = \_ model -> ( model, Cmd.none )
+    , view = \_ -> text ""
+    , subscriptions = \_ -> Sub.none
+    , decoder = Decode.succeed ()
+    }
+
+
+islandConstructorTests : Test
+islandConstructorTests =
+    describe "Island positional constructor"
+        [ test "constructs Island with correct id" <|
+            \() ->
+                let
+                    island =
+                        Island
+                            "test-island"
+                            (\_ -> ( (), Cmd.none ))
+                            (\_ model -> ( model, Cmd.none ))
+                            (\_ -> text "")
+                            (\_ -> Sub.none)
+                            (Decode.succeed ())
+                in
+                island.id
+                    |> Expect.equal "test-island"
+        , test "constructs Island with working view function" <|
+            \() ->
+                let
+                    island =
+                        Island
+                            "view-test"
+                            (\_ -> ( (), Cmd.none ))
+                            (\_ model -> ( model, Cmd.none ))
+                            (\_ -> text "rendered")
+                            (\_ -> Sub.none)
+                            (Decode.succeed ())
+
+                    html =
+                        island.view ()
+                in
+                Render.toString html
+                    |> Expect.equal "rendered"
+        ]

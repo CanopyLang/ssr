@@ -1,0 +1,486 @@
+module Test.Static exposing (main, tests)
+
+import Basics exposing (..)
+import Dict
+import Ssr.Static as Static exposing (ChangeFrequency(..), StaticRoute, GeneratedPage)
+import Test exposing (..)
+import Expect
+
+
+main : Test
+main =
+    tests
+
+
+tests : Test
+tests =
+    describe "Ssr.Static"
+        [ changeFrequencyTests
+        , generateSitemapTests
+        , generateSitemapEdgeCaseTests
+        , generateRobotsTests
+        , staticRouteConstructorTests
+        , generatedPageConstructorTests
+        ]
+
+
+
+-- CHANGE FREQUENCY
+
+
+changeFrequencyTests : Test
+changeFrequencyTests =
+    describe "changeFrequencyToString"
+        [ test "Always" <|
+            \() ->
+                Static.changeFrequencyToString Always
+                    |> Expect.equal "always"
+        , test "Hourly" <|
+            \() ->
+                Static.changeFrequencyToString Hourly
+                    |> Expect.equal "hourly"
+        , test "Daily" <|
+            \() ->
+                Static.changeFrequencyToString Daily
+                    |> Expect.equal "daily"
+        , test "Weekly" <|
+            \() ->
+                Static.changeFrequencyToString Weekly
+                    |> Expect.equal "weekly"
+        , test "Monthly" <|
+            \() ->
+                Static.changeFrequencyToString Monthly
+                    |> Expect.equal "monthly"
+        , test "Yearly" <|
+            \() ->
+                Static.changeFrequencyToString Yearly
+                    |> Expect.equal "yearly"
+        , test "Never" <|
+            \() ->
+                Static.changeFrequencyToString Never
+                    |> Expect.equal "never"
+        ]
+
+
+
+-- GENERATE SITEMAP
+
+
+generateSitemapTests : Test
+generateSitemapTests =
+    describe "generateSitemap"
+        [ test "generates valid XML header" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes = []
+                        }
+                in
+                String.contains "<?xml version=\"1.0\"" sitemap
+                    |> Expect.equal True
+        , test "includes urlset namespace" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes = []
+                        }
+                in
+                String.contains "sitemaps.org" sitemap
+                    |> Expect.equal True
+        , test "includes route URL" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/about"
+                              , params = Dict.empty
+                              , changeFrequency = Nothing
+                              , priority = Nothing
+                              }
+                            ]
+                        }
+                in
+                String.contains "https://example.com/about" sitemap
+                    |> Expect.equal True
+        , test "includes changefreq when specified" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/"
+                              , params = Dict.empty
+                              , changeFrequency = Just Daily
+                              , priority = Nothing
+                              }
+                            ]
+                        }
+                in
+                String.contains "<changefreq>daily</changefreq>" sitemap
+                    |> Expect.equal True
+        , test "includes priority when specified" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/"
+                              , params = Dict.empty
+                              , changeFrequency = Nothing
+                              , priority = Just 0.8
+                              }
+                            ]
+                        }
+                in
+                String.contains "<priority>" sitemap
+                    |> Expect.equal True
+        , test "handles multiple routes" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/", params = Dict.empty, changeFrequency = Nothing, priority = Nothing }
+                            , { path = "/about", params = Dict.empty, changeFrequency = Nothing, priority = Nothing }
+                            , { path = "/contact", params = Dict.empty, changeFrequency = Nothing, priority = Nothing }
+                            ]
+                        }
+                in
+                (String.contains "example.com/" sitemap
+                    && String.contains "example.com/about" sitemap
+                    && String.contains "example.com/contact" sitemap)
+                    |> Expect.equal True
+        , test "escapes special characters in URLs" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/search?q=a&b=c"
+                              , params = Dict.empty
+                              , changeFrequency = Nothing
+                              , priority = Nothing
+                              }
+                            ]
+                        }
+                in
+                String.contains "&amp;" sitemap
+                    |> Expect.equal True
+        , test "closes urlset tag" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes = []
+                        }
+                in
+                String.contains "</urlset>" sitemap
+                    |> Expect.equal True
+        , test "includes both changefreq and priority on same route" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/"
+                              , params = Dict.empty
+                              , changeFrequency = Just Weekly
+                              , priority = Just 1.0
+                              }
+                            ]
+                        }
+                in
+                (String.contains "<changefreq>weekly</changefreq>" sitemap
+                    && String.contains "<priority>" sitemap)
+                    |> Expect.equal True
+        , test "omits changefreq and priority when both Nothing" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/plain"
+                              , params = Dict.empty
+                              , changeFrequency = Nothing
+                              , priority = Nothing
+                              }
+                            ]
+                        }
+                in
+                (not (String.contains "<changefreq>" sitemap)
+                    && not (String.contains "<priority>" sitemap))
+                    |> Expect.equal True
+        ]
+
+
+
+-- GENERATE ROBOTS
+
+
+generateRobotsTests : Test
+generateRobotsTests =
+    describe "generateRobots"
+        [ test "includes user agent" <|
+            \() ->
+                let
+                    robots = Static.generateRobots
+                        { sitemapUrl = "https://example.com/sitemap.xml"
+                        , allow = []
+                        , disallow = []
+                        , userAgent = "*"
+                        }
+                in
+                String.contains "User-agent: *" robots
+                    |> Expect.equal True
+        , test "includes sitemap URL" <|
+            \() ->
+                let
+                    robots = Static.generateRobots
+                        { sitemapUrl = "https://example.com/sitemap.xml"
+                        , allow = []
+                        , disallow = []
+                        , userAgent = "*"
+                        }
+                in
+                String.contains "Sitemap: https://example.com/sitemap.xml" robots
+                    |> Expect.equal True
+        , test "includes allow paths" <|
+            \() ->
+                let
+                    robots = Static.generateRobots
+                        { sitemapUrl = "https://example.com/sitemap.xml"
+                        , allow = [ "/", "/public/" ]
+                        , disallow = []
+                        , userAgent = "*"
+                        }
+                in
+                (String.contains "Allow: /" robots
+                    && String.contains "Allow: /public/" robots)
+                    |> Expect.equal True
+        , test "includes disallow paths" <|
+            \() ->
+                let
+                    robots = Static.generateRobots
+                        { sitemapUrl = "https://example.com/sitemap.xml"
+                        , allow = []
+                        , disallow = [ "/admin/", "/private/" ]
+                        , userAgent = "*"
+                        }
+                in
+                (String.contains "Disallow: /admin/" robots
+                    && String.contains "Disallow: /private/" robots)
+                    |> Expect.equal True
+        , test "custom user agent" <|
+            \() ->
+                let
+                    robots = Static.generateRobots
+                        { sitemapUrl = "https://example.com/sitemap.xml"
+                        , allow = [ "/" ]
+                        , disallow = []
+                        , userAgent = "Googlebot"
+                        }
+                in
+                String.contains "User-agent: Googlebot" robots
+                    |> Expect.equal True
+        , test "empty allow and disallow produces minimal output" <|
+            \() ->
+                let
+                    robots = Static.generateRobots
+                        { sitemapUrl = "https://example.com/sitemap.xml"
+                        , allow = []
+                        , disallow = []
+                        , userAgent = "*"
+                        }
+                in
+                (String.contains "User-agent: *" robots
+                    && String.contains "Sitemap:" robots
+                    && not (String.contains "Allow:" robots)
+                    && not (String.contains "Disallow:" robots))
+                    |> Expect.equal True
+        , test "multiple allow and disallow paths" <|
+            \() ->
+                let
+                    robots = Static.generateRobots
+                        { sitemapUrl = "https://example.com/sitemap.xml"
+                        , allow = [ "/", "/public/", "/api/" ]
+                        , disallow = [ "/admin/", "/private/", "/secret/" ]
+                        , userAgent = "*"
+                        }
+                in
+                (String.contains "Allow: /" robots
+                    && String.contains "Allow: /public/" robots
+                    && String.contains "Allow: /api/" robots
+                    && String.contains "Disallow: /admin/" robots
+                    && String.contains "Disallow: /private/" robots
+                    && String.contains "Disallow: /secret/" robots)
+                    |> Expect.equal True
+        ]
+
+
+generateSitemapEdgeCaseTests : Test
+generateSitemapEdgeCaseTests =
+    describe "generateSitemap edge cases"
+        [ test "route with only changefreq no priority" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/blog"
+                              , params = Dict.empty
+                              , changeFrequency = Just Monthly
+                              , priority = Nothing
+                              }
+                            ]
+                        }
+                in
+                (String.contains "<changefreq>monthly</changefreq>" sitemap
+                    && not (String.contains "<priority>" sitemap))
+                    |> Expect.equal True
+        , test "route with only priority no changefreq" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/landing"
+                              , params = Dict.empty
+                              , changeFrequency = Nothing
+                              , priority = Just 0.9
+                              }
+                            ]
+                        }
+                in
+                (not (String.contains "<changefreq>" sitemap)
+                    && String.contains "<priority>" sitemap)
+                    |> Expect.equal True
+        , test "all change frequencies appear in sitemap" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/a", params = Dict.empty, changeFrequency = Just Always, priority = Nothing }
+                            , { path = "/b", params = Dict.empty, changeFrequency = Just Hourly, priority = Nothing }
+                            , { path = "/c", params = Dict.empty, changeFrequency = Just Daily, priority = Nothing }
+                            , { path = "/d", params = Dict.empty, changeFrequency = Just Weekly, priority = Nothing }
+                            , { path = "/e", params = Dict.empty, changeFrequency = Just Monthly, priority = Nothing }
+                            , { path = "/f", params = Dict.empty, changeFrequency = Just Yearly, priority = Nothing }
+                            , { path = "/g", params = Dict.empty, changeFrequency = Just Never, priority = Nothing }
+                            ]
+                        }
+                in
+                (String.contains "always" sitemap
+                    && String.contains "hourly" sitemap
+                    && String.contains "daily" sitemap
+                    && String.contains "weekly" sitemap
+                    && String.contains "monthly" sitemap
+                    && String.contains "yearly" sitemap
+                    && String.contains "never" sitemap)
+                    |> Expect.equal True
+        , test "empty routes produces valid sitemap structure" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes = []
+                        }
+                in
+                (String.contains "<?xml" sitemap
+                    && String.contains "<urlset" sitemap
+                    && String.contains "</urlset>" sitemap)
+                    |> Expect.equal True
+        , test "each route wrapped in url tags" <|
+            \() ->
+                let
+                    sitemap = Static.generateSitemap
+                        { baseUrl = "https://example.com"
+                        , routes =
+                            [ { path = "/page1"
+                              , params = Dict.empty
+                              , changeFrequency = Nothing
+                              , priority = Nothing
+                              }
+                            ]
+                        }
+                in
+                (String.contains "<url>" sitemap
+                    && String.contains "</url>" sitemap
+                    && String.contains "<loc>" sitemap
+                    && String.contains "</loc>" sitemap)
+                    |> Expect.equal True
+        ]
+
+
+staticRouteConstructorTests : Test
+staticRouteConstructorTests =
+    describe "StaticRoute positional constructor"
+        [ test "constructs StaticRoute with correct path" <|
+            \() ->
+                let
+                    route =
+                        StaticRoute "/about" Dict.empty (Just Daily) (Just 0.8)
+                in
+                route.path
+                    |> Expect.equal "/about"
+        , test "constructs StaticRoute with correct params" <|
+            \() ->
+                let
+                    params =
+                        Dict.singleton "id" "123"
+
+                    route =
+                        StaticRoute "/post" params Nothing Nothing
+                in
+                Dict.get "id" route.params
+                    |> Expect.equal (Just "123")
+        , test "constructs StaticRoute with correct changeFrequency" <|
+            \() ->
+                let
+                    route =
+                        StaticRoute "/" Dict.empty (Just Weekly) (Just 1.0)
+                in
+                route.changeFrequency
+                    |> Expect.equal (Just Weekly)
+        , test "constructs StaticRoute with correct priority" <|
+            \() ->
+                let
+                    route =
+                        StaticRoute "/" Dict.empty Nothing (Just 0.5)
+                in
+                route.priority
+                    |> Expect.equal (Just 0.5)
+        ]
+
+
+generatedPageConstructorTests : Test
+generatedPageConstructorTests =
+    describe "GeneratedPage positional constructor"
+        [ test "constructs GeneratedPage with correct path" <|
+            \() ->
+                let
+                    page =
+                        GeneratedPage "/index.html" "https://example.com/" 4096
+                in
+                page.path
+                    |> Expect.equal "/index.html"
+        , test "constructs GeneratedPage with correct url" <|
+            \() ->
+                let
+                    page =
+                        GeneratedPage "/about.html" "https://example.com/about" 2048
+                in
+                page.url
+                    |> Expect.equal "https://example.com/about"
+        , test "constructs GeneratedPage with correct size" <|
+            \() ->
+                let
+                    page =
+                        GeneratedPage "/page.html" "https://example.com/page" 512
+                in
+                page.size
+                    |> Expect.equal 512
+        ]

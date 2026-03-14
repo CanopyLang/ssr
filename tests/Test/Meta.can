@@ -1,0 +1,253 @@
+module Test.Meta exposing (main, tests)
+
+import Basics exposing (..)
+import Json.Encode as Encode
+import Ssr.Meta as Meta exposing (MetaTag(..), LinkTag(..), ScriptTag(..))
+import Test exposing (..)
+import Expect
+
+
+main : Test
+main =
+    tests
+
+
+tests : Test
+tests =
+    describe "Ssr.Meta"
+        [ metaTagBuilderTests
+        , renderMetaTagTests
+        , renderMetaTagsTests
+        , linkTagTests
+        , renderLinkTagTests
+        , scriptTagTests
+        , renderScriptTagTests
+        ]
+
+
+
+-- META TAG BUILDERS
+
+
+metaTagBuilderTests : Test
+metaTagBuilderTests =
+    describe "meta tag builders"
+        [ test "description creates NameContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.description "A test page")
+                    |> Expect.equal "<meta name=\"description\" content=\"A test page\" />"
+        , test "keywords joins with commas" <|
+            \() ->
+                Meta.renderMetaTag (Meta.keywords [ "canopy", "ssr" ])
+                    |> Expect.equal "<meta name=\"keywords\" content=\"canopy, ssr\" />"
+        , test "robots creates NameContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.robots "index, follow")
+                    |> Expect.equal "<meta name=\"robots\" content=\"index, follow\" />"
+        , test "viewport creates NameContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.viewport "width=device-width, initial-scale=1")
+                    |> Expect.equal "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />"
+        , test "ogTitle creates PropertyContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.ogTitle "My Page")
+                    |> Expect.equal "<meta property=\"og:title\" content=\"My Page\" />"
+        , test "ogDescription creates PropertyContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.ogDescription "A description")
+                    |> Expect.equal "<meta property=\"og:description\" content=\"A description\" />"
+        , test "ogImage creates PropertyContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.ogImage "https://example.com/img.jpg")
+                    |> Expect.equal "<meta property=\"og:image\" content=\"https://example.com/img.jpg\" />"
+        , test "ogUrl creates PropertyContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.ogUrl "https://example.com")
+                    |> Expect.equal "<meta property=\"og:url\" content=\"https://example.com\" />"
+        , test "ogType creates PropertyContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.ogType "article")
+                    |> Expect.equal "<meta property=\"og:type\" content=\"article\" />"
+        , test "ogSiteName creates PropertyContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.ogSiteName "My Site")
+                    |> Expect.equal "<meta property=\"og:site_name\" content=\"My Site\" />"
+        , test "ogLocale creates PropertyContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.ogLocale "en_US")
+                    |> Expect.equal "<meta property=\"og:locale\" content=\"en_US\" />"
+        , test "twitterCard creates NameContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.twitterCard "summary")
+                    |> Expect.equal "<meta name=\"twitter:card\" content=\"summary\" />"
+        , test "twitterTitle creates NameContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.twitterTitle "Title")
+                    |> Expect.equal "<meta name=\"twitter:title\" content=\"Title\" />"
+        , test "twitterDescription creates NameContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.twitterDescription "Desc")
+                    |> Expect.equal "<meta name=\"twitter:description\" content=\"Desc\" />"
+        , test "twitterImage creates NameContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.twitterImage "https://example.com/img.jpg")
+                    |> Expect.equal "<meta name=\"twitter:image\" content=\"https://example.com/img.jpg\" />"
+        , test "twitterSite creates NameContent" <|
+            \() ->
+                Meta.renderMetaTag (Meta.twitterSite "@mysite")
+                    |> Expect.equal "<meta name=\"twitter:site\" content=\"@mysite\" />"
+        ]
+
+
+
+-- RENDER META TAG
+
+
+renderMetaTagTests : Test
+renderMetaTagTests =
+    describe "renderMetaTag"
+        [ test "renders NameContent tag" <|
+            \() ->
+                Meta.renderMetaTag (NameContent "author" "John")
+                    |> Expect.equal "<meta name=\"author\" content=\"John\" />"
+        , test "renders PropertyContent tag" <|
+            \() ->
+                Meta.renderMetaTag (PropertyContent "og:title" "Test")
+                    |> Expect.equal "<meta property=\"og:title\" content=\"Test\" />"
+        , test "renders HttpEquiv tag" <|
+            \() ->
+                Meta.renderMetaTag (HttpEquiv "refresh" "30")
+                    |> Expect.equal "<meta http-equiv=\"refresh\" content=\"30\" />"
+        , test "renders Charset tag" <|
+            \() ->
+                Meta.renderMetaTag (Charset "utf-8")
+                    |> Expect.equal "<meta charset=\"utf-8\" />"
+        , test "escapes HTML in content" <|
+            \() ->
+                Meta.renderMetaTag (NameContent "test" "a<b>c")
+                    |> Expect.equal "<meta name=\"test\" content=\"a&lt;b&gt;c\" />"
+        ]
+
+
+
+-- RENDER META TAGS LIST
+
+
+renderMetaTagsTests : Test
+renderMetaTagsTests =
+    describe "renderMetaTags"
+        [ test "renders empty list" <|
+            \() ->
+                Meta.renderMetaTags []
+                    |> Expect.equal ""
+        , test "renders single tag" <|
+            \() ->
+                Meta.renderMetaTags [ Charset "utf-8" ]
+                    |> Expect.equal "<meta charset=\"utf-8\" />"
+        , test "joins multiple tags with newline" <|
+            \() ->
+                Meta.renderMetaTags [ Charset "utf-8", NameContent "author" "X" ]
+                    |> Expect.equal "<meta charset=\"utf-8\" />\n<meta name=\"author\" content=\"X\" />"
+        ]
+
+
+
+-- LINK TAGS
+
+
+linkTagTests : Test
+linkTagTests =
+    describe "LinkTag rendering"
+        [ test "renders Canonical" <|
+            \() ->
+                Meta.renderLinkTag (Canonical "https://example.com/page")
+                    |> Expect.equal "<link rel=\"canonical\" href=\"https://example.com/page\" />"
+        , test "renders Alternate" <|
+            \() ->
+                Meta.renderLinkTag (Alternate "en" "https://example.com/en")
+                    |> Expect.equal "<link rel=\"alternate\" hreflang=\"en\" href=\"https://example.com/en\" />"
+        , test "renders Stylesheet" <|
+            \() ->
+                Meta.renderLinkTag (Stylesheet "/style.css")
+                    |> Expect.equal "<link rel=\"stylesheet\" href=\"/style.css\" />"
+        , test "renders Preload" <|
+            \() ->
+                Meta.renderLinkTag (Preload "/font.woff2" "font")
+                    |> Expect.equal "<link rel=\"preload\" href=\"/font.woff2\" as=\"font\" />"
+        , test "renders Icon" <|
+            \() ->
+                Meta.renderLinkTag (Icon "image/png" "/icon.png" "32x32")
+                    |> Expect.equal "<link rel=\"icon\" type=\"image/png\" href=\"/icon.png\" sizes=\"32x32\" />"
+        , test "renders CustomLink" <|
+            \() ->
+                Meta.renderLinkTag (CustomLink [ ( "rel", "manifest" ), ( "href", "/manifest.json" ) ])
+                    |> Expect.equal "<link rel=\"manifest\" href=\"/manifest.json\" />"
+        ]
+
+
+
+-- RENDER LINK TAGS LIST
+
+
+renderLinkTagTests : Test
+renderLinkTagTests =
+    describe "renderLinkTags"
+        [ test "renders empty list" <|
+            \() ->
+                Meta.renderLinkTags []
+                    |> Expect.equal ""
+        , test "renders multiple tags" <|
+            \() ->
+                Meta.renderLinkTags [ Canonical "/", Stylesheet "/style.css" ]
+                    |> String.contains "\n"
+                    |> Expect.equal True
+        ]
+
+
+
+-- SCRIPT TAGS
+
+
+scriptTagTests : Test
+scriptTagTests =
+    describe "ScriptTag rendering"
+        [ test "renders InlineScript" <|
+            \() ->
+                Meta.renderScriptTag (InlineScript "console.log('hi')")
+                    |> Expect.equal "<script>console.log('hi')</script>"
+        , test "renders ExternalScript" <|
+            \() ->
+                Meta.renderScriptTag (ExternalScript "/app.js")
+                    |> Expect.equal "<script src=\"/app.js\"></script>"
+        , test "renders ModuleScript" <|
+            \() ->
+                Meta.renderScriptTag (ModuleScript "/mod.js")
+                    |> Expect.equal "<script type=\"module\" src=\"/mod.js\"></script>"
+        , test "renders JsonLd" <|
+            \() ->
+                let
+                    value = Encode.object [ ( "name", Encode.string "Test" ) ]
+                in
+                Meta.renderScriptTag (JsonLd value)
+                    |> String.contains "application/ld+json"
+                    |> Expect.equal True
+        ]
+
+
+
+-- RENDER SCRIPT TAGS LIST
+
+
+renderScriptTagTests : Test
+renderScriptTagTests =
+    describe "renderScriptTags"
+        [ test "renders empty list" <|
+            \() ->
+                Meta.renderScriptTags []
+                    |> Expect.equal ""
+        , test "renders multiple tags" <|
+            \() ->
+                Meta.renderScriptTags [ ExternalScript "/a.js", ExternalScript "/b.js" ]
+                    |> String.contains "\n"
+                    |> Expect.equal True
+        ]

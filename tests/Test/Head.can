@@ -1,0 +1,420 @@
+module Test.Head exposing (main, tests)
+
+import Basics exposing (..)
+import Json.Encode as Encode
+import Ssr.Head as Head exposing (HeadContext, Head)
+import Ssr.Meta as Meta exposing (MetaTag(..), LinkTag(..), ScriptTag(..))
+import Test exposing (..)
+import Expect
+
+
+main : Test
+main =
+    tests
+
+
+tests : Test
+tests =
+    describe "Ssr.Head"
+        [ initTests
+        , titleTests
+        , addMetaTests
+        , addLinkTests
+        , addScriptTests
+        , structuredDataTests
+        , mergeTests
+        , renderTests
+        , toHeadTests
+        , headConstructorTests
+        ]
+
+
+
+-- INIT
+
+
+initTests : Test
+initTests =
+    describe "init"
+        [ test "renders empty string for empty context" <|
+            \() ->
+                Head.render Head.init
+                    |> Expect.equal ""
+        , test "toHead returns empty head" <|
+            \() ->
+                let
+                    head = Head.toHead Head.init
+                in
+                head.title
+                    |> Expect.equal ""
+        ]
+
+
+
+-- TITLE
+
+
+titleTests : Test
+titleTests =
+    describe "title"
+        [ test "sets the title" <|
+            \() ->
+                Head.init
+                    |> Head.title "My Page"
+                    |> Head.render
+                    |> String.contains "<title>My Page</title>"
+                    |> Expect.equal True
+        , test "last title wins" <|
+            \() ->
+                Head.init
+                    |> Head.title "First"
+                    |> Head.title "Second"
+                    |> Head.render
+                    |> String.contains "<title>Second</title>"
+                    |> Expect.equal True
+        , test "title appears in toHead" <|
+            \() ->
+                Head.init
+                    |> Head.title "Test Title"
+                    |> Head.toHead
+                    |> .title
+                    |> Expect.equal "Test Title"
+        ]
+
+
+
+-- ADD META
+
+
+addMetaTests : Test
+addMetaTests =
+    describe "addMeta"
+        [ test "adds a meta tag" <|
+            \() ->
+                Head.init
+                    |> Head.addMeta (Meta.description "Test desc")
+                    |> Head.render
+                    |> String.contains "description"
+                    |> Expect.equal True
+        , test "multiple meta tags are included" <|
+            \() ->
+                let
+                    result =
+                        Head.init
+                            |> Head.addMeta (Meta.description "Desc")
+                            |> Head.addMeta (Meta.viewport "width=device-width")
+                            |> Head.render
+                in
+                (String.contains "description" result
+                    && String.contains "viewport" result)
+                    |> Expect.equal True
+        , test "meta tags appear in toHead" <|
+            \() ->
+                Head.init
+                    |> Head.addMeta (Meta.description "Test")
+                    |> Head.toHead
+                    |> .meta
+                    |> List.length
+                    |> Expect.equal 1
+        ]
+
+
+
+-- ADD LINK
+
+
+addLinkTests : Test
+addLinkTests =
+    describe "addLink"
+        [ test "adds a link tag" <|
+            \() ->
+                Head.init
+                    |> Head.addLink (Canonical "https://example.com")
+                    |> Head.render
+                    |> String.contains "canonical"
+                    |> Expect.equal True
+        , test "link tags appear in toHead" <|
+            \() ->
+                Head.init
+                    |> Head.addLink (Stylesheet "/style.css")
+                    |> Head.toHead
+                    |> .links
+                    |> List.length
+                    |> Expect.equal 1
+        ]
+
+
+
+-- ADD SCRIPT
+
+
+addScriptTests : Test
+addScriptTests =
+    describe "addScript"
+        [ test "adds a script tag" <|
+            \() ->
+                Head.init
+                    |> Head.addScript (ExternalScript "/app.js")
+                    |> Head.render
+                    |> String.contains "/app.js"
+                    |> Expect.equal True
+        , test "script tags appear in toHead" <|
+            \() ->
+                Head.init
+                    |> Head.addScript (InlineScript "alert(1)")
+                    |> Head.toHead
+                    |> .scripts
+                    |> List.length
+                    |> Expect.equal 1
+        ]
+
+
+
+-- STRUCTURED DATA
+
+
+structuredDataTests : Test
+structuredDataTests =
+    describe "setStructuredData"
+        [ test "adds JSON-LD script" <|
+            \() ->
+                let
+                    jsonLd = Encode.object [ ( "type", Encode.string "Article" ) ]
+                in
+                Head.init
+                    |> Head.setStructuredData jsonLd
+                    |> Head.render
+                    |> String.contains "application/ld+json"
+                    |> Expect.equal True
+        , test "structured data in toHead" <|
+            \() ->
+                let
+                    jsonLd = Encode.object [ ( "type", Encode.string "Article" ) ]
+                    head = Head.init
+                        |> Head.setStructuredData jsonLd
+                        |> Head.toHead
+                in
+                case head.structuredData of
+                    Just _ ->
+                        Expect.pass
+
+                    Nothing ->
+                        Expect.fail "Expected structured data to be present"
+        ]
+
+
+
+-- MERGE
+
+
+mergeTests : Test
+mergeTests =
+    describe "merge"
+        [ test "merges meta tags from both contexts" <|
+            \() ->
+                let
+                    a = Head.init |> Head.addMeta (Meta.description "A")
+                    b = Head.init |> Head.addMeta (Meta.viewport "B")
+                    result = Head.merge a b |> Head.render
+                in
+                (String.contains "description" result
+                    && String.contains "viewport" result)
+                    |> Expect.equal True
+        , test "second title wins in merge" <|
+            \() ->
+                let
+                    a = Head.init |> Head.title "First"
+                    b = Head.init |> Head.title "Second"
+                in
+                Head.merge a b
+                    |> Head.render
+                    |> String.contains "<title>Second</title>"
+                    |> Expect.equal True
+        , test "first title preserved if second empty" <|
+            \() ->
+                let
+                    a = Head.init |> Head.title "First"
+                    b = Head.init
+                in
+                Head.merge a b
+                    |> Head.render
+                    |> String.contains "<title>First</title>"
+                    |> Expect.equal True
+        , test "second structured data wins" <|
+            \() ->
+                let
+                    a = Head.init |> Head.setStructuredData (Encode.string "a")
+                    b = Head.init |> Head.setStructuredData (Encode.string "b")
+                    result = Head.merge a b |> Head.render
+                in
+                String.contains "\"b\"" result
+                    |> Expect.equal True
+        , test "first structured data kept if second absent" <|
+            \() ->
+                let
+                    a = Head.init |> Head.setStructuredData (Encode.string "a")
+                    b = Head.init
+                    result = Head.merge a b |> Head.render
+                in
+                String.contains "\"a\"" result
+                    |> Expect.equal True
+        , test "merges links from both contexts" <|
+            \() ->
+                let
+                    a = Head.init |> Head.addLink (Canonical "https://a.com")
+                    b = Head.init |> Head.addLink (Stylesheet "/b.css")
+                    result = Head.merge a b |> Head.render
+                in
+                (String.contains "canonical" result
+                    && String.contains "/b.css" result)
+                    |> Expect.equal True
+        , test "merges scripts from both contexts" <|
+            \() ->
+                let
+                    a = Head.init |> Head.addScript (ExternalScript "/a.js")
+                    b = Head.init |> Head.addScript (InlineScript "alert(1)")
+                    result = Head.merge a b |> Head.render
+                in
+                (String.contains "/a.js" result
+                    && String.contains "alert(1)" result)
+                    |> Expect.equal True
+        , test "merges all head elements together" <|
+            \() ->
+                let
+                    a = Head.init
+                        |> Head.title "First"
+                        |> Head.addMeta (Meta.description "Desc A")
+                        |> Head.addLink (Canonical "https://a.com")
+                        |> Head.addScript (ExternalScript "/a.js")
+                    b = Head.init
+                        |> Head.title "Second"
+                        |> Head.addMeta (Meta.viewport "width=device-width")
+                        |> Head.addLink (Stylesheet "/b.css")
+                        |> Head.addScript (InlineScript "init()")
+                    result = Head.merge a b |> Head.render
+                in
+                (String.contains "<title>Second</title>" result
+                    && String.contains "description" result
+                    && String.contains "viewport" result
+                    && String.contains "canonical" result
+                    && String.contains "/b.css" result
+                    && String.contains "/a.js" result
+                    && String.contains "init()" result)
+                    |> Expect.equal True
+        ]
+
+
+
+-- RENDER
+
+
+renderTests : Test
+renderTests =
+    describe "render"
+        [ test "combines title, meta, and links" <|
+            \() ->
+                let
+                    result =
+                        Head.init
+                            |> Head.title "Page"
+                            |> Head.addMeta (Meta.description "Desc")
+                            |> Head.addLink (Stylesheet "/style.css")
+                            |> Head.render
+                in
+                (String.contains "<title>Page</title>" result
+                    && String.contains "description" result
+                    && String.contains "stylesheet" result)
+                    |> Expect.equal True
+        , test "omits empty sections" <|
+            \() ->
+                let
+                    result = Head.init |> Head.title "Only Title" |> Head.render
+                in
+                (String.contains "<title>Only Title</title>" result
+                    && not (String.contains "meta" result))
+                    |> Expect.equal True
+        , test "renders links in output" <|
+            \() ->
+                let
+                    result =
+                        Head.init
+                            |> Head.addLink (Canonical "https://example.com")
+                            |> Head.addLink (Stylesheet "/main.css")
+                            |> Head.render
+                in
+                (String.contains "canonical" result
+                    && String.contains "/main.css" result)
+                    |> Expect.equal True
+        , test "renders scripts in output" <|
+            \() ->
+                let
+                    result =
+                        Head.init
+                            |> Head.addScript (ExternalScript "/bundle.js")
+                            |> Head.render
+                in
+                String.contains "/bundle.js" result
+                    |> Expect.equal True
+        ]
+
+
+
+-- TO HEAD
+
+
+toHeadTests : Test
+toHeadTests =
+    describe "toHead"
+        [ test "returns complete head record" <|
+            \() ->
+                let
+                    head =
+                        Head.init
+                            |> Head.title "Test"
+                            |> Head.addMeta (Meta.description "D")
+                            |> Head.addLink (Stylesheet "/s.css")
+                            |> Head.addScript (ExternalScript "/a.js")
+                            |> Head.toHead
+                in
+                (head.title == "Test"
+                    && List.length head.meta == 1
+                    && List.length head.links == 1
+                    && List.length head.scripts == 1)
+                    |> Expect.equal True
+        ]
+
+
+headConstructorTests : Test
+headConstructorTests =
+    describe "Head positional constructor"
+        [ test "constructs Head with correct title" <|
+            \() ->
+                let
+                    head =
+                        Head "My Title" [] [] [] Nothing
+                in
+                head.title
+                    |> Expect.equal "My Title"
+        , test "constructs Head with correct meta list" <|
+            \() ->
+                let
+                    meta =
+                        [ Meta.description "Test" ]
+
+                    head =
+                        Head "T" meta [] [] Nothing
+                in
+                List.length head.meta
+                    |> Expect.equal 1
+        , test "constructs Head with correct structuredData" <|
+            \() ->
+                let
+                    sd =
+                        Just (Encode.string "data")
+
+                    head =
+                        Head "T" [] [] [] sd
+                in
+                head.structuredData
+                    |> Expect.equal sd
+        ]
