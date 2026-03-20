@@ -58,12 +58,28 @@ function escapeHtml(str) {
 }
 
 /**
- * Escape attribute values (same as escapeHtml but included for clarity).
+ * Escape a string for safe embedding inside an HTML attribute value.
+ * Handles all characters that could break out of or inject into attribute
+ * context: &, <, >, ", ', backtick, and =.
  * @param {string} str
  * @returns {string}
  */
 function _Ssr_escapeAttr(str) {
-    return escapeHtml(String(str));
+    str = String(str);
+    if (str.indexOf('&') === -1 && str.indexOf('<') === -1 &&
+        str.indexOf('>') === -1 && str.indexOf('"') === -1 &&
+        str.indexOf("'") === -1 && str.indexOf('`') === -1 &&
+        str.indexOf('=') === -1) {
+        return str;
+    }
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+        .replace(/`/g, '&#x60;')
+        .replace(/=/g, '&#x3D;');
 }
 
 

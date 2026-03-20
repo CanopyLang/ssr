@@ -5,6 +5,7 @@ module Ssr.Island exposing
     , withDirective
     , renderIslandWrapper
     , directiveToString
+    , escapeAttr
     )
 
 
@@ -21,7 +22,7 @@ hydrates only the interactive portions of the page.
 @docs placeholder, withDirective
 
 # Rendering
-@docs renderIslandWrapper, directiveToString
+@docs renderIslandWrapper, directiveToString, escapeAttr
 
 -}
 
@@ -103,19 +104,39 @@ withDirective directive island =
 Used by the SSR renderer to produce the data-attribute wrapper without
 going through VirtualDom.
 
+The `propsJson` string is HTML-attribute-escaped so that JSON values
+containing `"` characters do not break the surrounding attribute syntax.
+The client-side hydration runtime must decode the attribute value through
+the normal HTML attribute getter (which reverses the escaping).
+
     renderIslandWrapper "comments" "{\"postId\":1}" OnVisible "<div>Loading...</div>"
 -}
 renderIslandWrapper : String -> String -> HydrationDirective -> String -> String
 renderIslandWrapper islandId propsJson directive fallbackHtml =
     "<div data-canopy-island=\""
-        ++ islandId
+        ++ escapeAttr islandId
         ++ "\" data-canopy-props=\""
-        ++ propsJson
+        ++ escapeAttr propsJson
         ++ "\" data-canopy-hydrate=\""
-        ++ directiveToString directive
+        ++ escapeAttr (directiveToString directive)
         ++ "\">"
         ++ fallbackHtml
         ++ "</div>"
+
+
+{-| Escape a string for safe embedding inside an HTML attribute value
+delimited by double quotes. Escapes `&`, `<`, `>`, `"`, `'`, backtick,
+and `=` to prevent attribute injection. -}
+escapeAttr : String -> String
+escapeAttr s =
+    s
+        |> String.replace "&" "&amp;"
+        |> String.replace "<" "&lt;"
+        |> String.replace ">" "&gt;"
+        |> String.replace "\"" "&quot;"
+        |> String.replace "'" "&#x27;"
+        |> String.replace "`" "&#x60;"
+        |> String.replace "=" "&#x3D;"
 
 
 {-| Convert a HydrationDirective to its string representation for use
